@@ -1,0 +1,19 @@
+{
+  "name": "mise-en-place",
+  "version": "0.0.1",
+  "description": "Claude Code plugin mise-en-place (Requires mise to be installed)",
+  "author": {
+    "name": "mise contributors",
+    "email": "contact@mise.jdx.dev"
+  },
+  "homepage": "https://mise.jdx.dev",
+  "mcpServers": {
+    "mise": {
+      "command": "mise",
+      "args": ["mcp"],
+      "env": {
+        "MISE_EXPERIMENTAL": "1"
+      }
+    }
+  }
+}
