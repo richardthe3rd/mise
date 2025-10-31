@@ -1,7 +1,7 @@
 {
   "name": "mise-en-place",
-  "version": "0.0.1",
-  "description": "Claude Code plugin mise-en-place (Requires mise to be installed)",
+  "version": "0.1.0",
+  "description": "Claude Code plugin for mise development tool manager. Provides MCP server integration, mise-workflow skill for active development, and automatic project detection. (Requires mise to be installed)",
   "author": {
     "name": "mise contributors",
     "email": "contact@mise.jdx.dev"
