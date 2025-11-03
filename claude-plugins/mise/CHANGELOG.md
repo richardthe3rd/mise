@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.2.0] - 2025-11-03
+
+### Added
+- **`/mise-en-place:detect` command** for on-demand project detection
+  - Shows project root from `mise://config` MCP resource
+  - Displays configuration file hierarchy (project → user → system)
+  - Lists first 8 active tools with total count
+  - Shows first 8-10 key development tasks with total count
+  - Includes full mise.toml configuration content
+  - Fast execution using MCP resources only
+
+### Improved
+- **Performance optimization**: Removed slow `mise doctor` check from detect command
+- **Efficiency**: Limited tool/task lists to most relevant items with counts
+- **Usability**: More scannable, concise output format
+- **Reliability**: Fixed MCP server name to use "mise-en-place" correctly
+
+### Fixed
+- MCP server name in detect command (was "mise", now "mise-en-place")
+
 ## [0.1.0] - 2025-10-31
 
 ### Added

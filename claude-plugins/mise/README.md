@@ -38,13 +38,15 @@ Intelligent skill that assists with three core development workflows:
 
 ### 3. Automatic Project Detection
 
-SessionStart hook that automatically detects mise projects and injects context:
+**SessionStart hook** automatically detects mise projects and injects context when you start a session.
 
-- Shows mise.toml configuration
-- Lists active tools and versions
-- Displays available tasks with descriptions
-- Reports any `mise doctor` warnings
-- Reminds Claude to use the mise-workflow skill
+**`/mise-en-place:detect` command** provides on-demand project context:
+
+- Shows project root and configuration file hierarchy
+- Lists active tools with versions (first 8, with total count)
+- Displays key development tasks (first 8-10, with total count)
+- Shows full mise.toml configuration
+- Fast and efficient (no slow health checks)
 
 ## Installation
 
@@ -93,18 +95,23 @@ The plugin automatically sets `MISE_EXPERIMENTAL=1` for the MCP server. No addit
 
 ### Understanding a Project
 
-The plugin works automatically when you open a mise project. Claude will receive:
+The plugin works automatically when you open a mise project. You can also manually trigger detection:
 
-- Project configuration
-- Available tools and versions
-- Available tasks
-- Any health warnings
+```
+/mise-en-place:detect
+```
+
+Claude will receive:
+- Project root and configuration file hierarchy
+- Available tools and versions (with counts)
+- Available tasks (with descriptions)
+- Full mise.toml configuration
 
 Ask Claude:
 - "What tools does this project use?"
 - "What tasks are available?"
 - "What does the build task do?"
-- "Are there any mise issues in this project?"
+- "Show me the project structure"
 
 ### Running Commands
 
@@ -159,18 +166,20 @@ The `mise-workflow` skill provides procedural knowledge for working with mise pr
 
 The skill uses **progressive disclosure** - Claude starts with the concise SKILL.md and loads detailed references only when needed.
 
-### SessionStart Hook
+### SessionStart Hook & Detect Command
 
-When you enter a directory with a mise configuration:
+**SessionStart Hook:** When you enter a directory with a mise configuration, it automatically injects project context.
 
-1. Detects `mise.toml` or `.mise.toml`
-2. Reads and displays configuration
-3. Runs `mise ls --json` to show tools
-4. Runs `mise tasks ls --json` to show tasks
-5. Runs `mise doctor` to check for issues
-6. Reminds Claude to use the mise-workflow skill
+**Detect Command (`/mise-en-place:detect`):** On-demand project detection that:
 
-This gives Claude immediate context about the project without needing to run commands.
+1. Detects `mise.toml`, `.mise.toml`, or `config/mise.toml`
+2. Queries `mise://config` MCP resource for project root and config files
+3. Queries `mise://tools` MCP resource for active tools (shows first 8 + count)
+4. Queries `mise://tasks` MCP resource for available tasks (shows first 8-10 + count)
+5. Displays full mise.toml configuration
+6. Fast execution using MCP resources (no slow shell commands)
+
+This gives Claude immediate context about the project efficiently.
 
 ## Example Workflows
 
@@ -330,6 +339,8 @@ This plugin is part of the mise project. Contributions are welcome!
 claude-plugins/mise/
 ├── .claude-plugin/
 │   └── plugin.json          # Plugin manifest
+├── commands/
+│   └── detect.md            # Detect command definition
 ├── hooks/
 │   ├── hooks.json           # Hook configuration
 │   └── scripts/
@@ -341,6 +352,7 @@ claude-plugins/mise/
 │           ├── understanding-projects.md
 │           ├── running-commands.md
 │           └── adding-capabilities.md
+├── CHANGELOG.md             # Version history
 └── README.md                # This file
 ```
 
@@ -350,11 +362,17 @@ MIT License - See the mise project for full license details.
 
 ## Version History
 
+**0.2.0** (2025-11-03)
+- Added `/mise-en-place:detect` command for on-demand project detection
+- Enhanced with `mise://config` MCP resource for config file hierarchy
+- Improved efficiency: removed slow `mise doctor` check, limited output to key items
+- Fixed MCP server name to use "mise-en-place"
+
 **0.1.0** (2025-10-31)
 - Added mise-workflow skill for active development
 - Added SessionStart hook for automatic project detection
 - Added comprehensive reference documentation
 - Improved plugin description
 
-**0.0.1**
+**0.0.1** (2025-10-29)
 - Initial release with MCP server integration
