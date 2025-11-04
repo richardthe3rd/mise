@@ -1,7 +1,7 @@
 {
   "name": "mise-en-place",
-  "version": "0.2.0",
-  "description": "Claude Code plugin for mise development tool manager. Provides MCP server integration, mise-workflow skill for active development, /mise-en-place:detect command for on-demand project context, and automatic project detection. (Requires mise to be installed)",
+  "version": "0.3.0",
+  "description": "Claude Code plugin for mise development tool manager. Provides MCP server integration, optimized mise-workflow skill with task arguments (usage) support, /mise-en-place:detect command for on-demand project context, and automatic project detection. (Requires mise to be installed)",
   "author": {
     "name": "mise contributors",
     "email": "contact@mise.jdx.dev"

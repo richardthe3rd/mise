@@ -309,13 +309,18 @@ The mise-workflow skill covers:
 
 ## Progressive Disclosure
 
-The plugin demonstrates effective progressive disclosure:
+The plugin uses an optimized progressive disclosure architecture for context efficiency:
 
 1. **Plugin metadata** (~100 words): Always in context, describes when to use the plugin
-2. **SKILL.md** (~450 lines): Quick reference loaded when skill activates
-3. **Reference files** (~50KB total): Detailed guides loaded only when Claude determines they're needed
+2. **SKILL.md** (~200 lines): Self-sufficient quick reference covering all basic workflows
+3. **Reference files** (advanced-only): Deep dives into edge cases and complex scenarios only
+   - understanding-projects.md - Advanced config hierarchy, version specs, tool resolution
+   - running-commands.md - Complex orchestration, parallelism, debugging patterns
+   - adding-capabilities.md - Advanced tool options, conditional installation, monorepo patterns
 
-This keeps Claude's context efficient while providing comprehensive information when required.
+**Key improvement**: Reference files now contain only advanced content. All basic operations are in SKILL.md, making references truly optional - loaded only when users encounter complex scenarios beyond standard workflows.
+
+This architecture minimizes context usage while ensuring comprehensive coverage when needed.
 
 ## About mise
 
@@ -361,6 +366,12 @@ claude-plugins/mise/
 MIT License - See the mise project for full license details.
 
 ## Version History
+
+**0.3.0** (2025-11-04)
+- Added task arguments (usage field) support to SKILL.md
+- Added Tera→usage migration guide to advanced reference
+- Optimized progressive disclosure: SKILL.md reduced 28%, references now advanced-only
+- ~40% reduction in essential context size while maintaining comprehensive coverage
 
 **0.2.0** (2025-11-03)
 - Added `/mise-en-place:detect` command for on-demand project detection

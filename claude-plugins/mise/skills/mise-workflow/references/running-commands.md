@@ -1,216 +1,141 @@
-# Running Commands with Mise
+# Running Commands with Mise - Advanced Topics
 
-Complete guide to executing tasks and commands with mise-managed tools.
+Advanced task execution patterns, parallel execution, and complex orchestration scenarios.
 
-## Quick Reference
+> **Note**: For basic task execution, use the main mise-workflow skill. This reference covers advanced scenarios only.
 
-```bash
-# Run tasks
-mise run <task>              # Run a task
-mise r <task>                # Short alias
-mise <task>                  # Direct shorthand (avoid in scripts)
-mise run task1 task2         # Run multiple tasks in order
-mise run build -- --release  # Pass arguments to task
+## Advanced Dependency Control
 
-# Task management
-mise tasks                   # List all tasks
-mise tasks ls --json         # List tasks with full details
-mise tasks info <task>       # Show task configuration
-mise tasks deps <task>       # Show task dependencies
+Three types of dependencies provide fine-grained orchestration control:
 
-# Execute with mise environment
-mise exec -- command args    # Execute command with mise tools
-mise x -- command args       # Short alias
+### depends - Parallel Pre-Dependencies
 
-# Watch and rebuild
-mise watch <task>            # Re-run task on file changes
-
-# Advanced
-mise run --jobs 8 test       # Run with 8 parallel jobs
-mise run --interleave test   # Show output immediately (not line-buffered)
+```toml
+[tasks.deploy]
+depends = ["build", "test"]  # Both run in parallel before deploy
+run = "./deploy.sh"
 ```
 
-## Running Tasks
+### depends_post - Post-Task Actions
 
-### Basic Execution
-
-Run a task defined in mise.toml or mise-tasks/:
-
-```bash
-mise run build
-```
-
-This will:
-1. Load the mise environment (tools, env vars)
-2. Resolve task dependencies
-3. Execute the task with the mise environment
-
-### Task Aliases
-
-There are multiple ways to run tasks:
-
-```bash
-mise run build    # Full form (recommended for scripts)
-mise r build      # Short form
-mise build        # Direct form (avoid in scripts/docs)
-```
-
-**Important:** The direct form `mise build` can be shadowed if mise adds a `build` command in the future. Always use `mise run build` in scripts and documentation.
-
-### Passing Arguments
-
-Pass arguments to tasks after `--`:
-
-```bash
-# Single task with args
-mise run build -- --release --verbose
-
-# Args go to the last command in multi-command tasks
-mise run test -- --filter=integration
-```
-
-If a task has multiple commands, arguments only pass to the last one:
+Run tasks after completion, useful for cleanup or notifications:
 
 ```toml
 [tasks.build]
-run = [
-    "cargo clean",
-    "cargo build"  # Args go here
-]
+description = "Build application"
+run = "npm run build"
+depends_post = ["notify", "tag-release"]
+
+[tasks.notify]
+description = "Send build notification"
+run = "curl -X POST $WEBHOOK_URL -d 'Build complete'"
+
+[tasks.tag-release]
+description = "Tag git release"
+run = "git tag v{{vars.version}}"
 ```
 
-To pass arguments to earlier commands, define them explicitly in the task or use separate tasks.
+### wait_for - Coordination Without Dependencies
 
-### Running Multiple Tasks
-
-Run tasks in sequence:
-
-```bash
-# Run lint, then test, then build
-mise run lint test build
-```
-
-Tasks run in the order specified. If any task fails, execution stops.
-
-Use the `:::` delimiter to pass different arguments to different tasks:
-
-```bash
-mise run build arg1 arg2 ::: test arg3 arg4
-# Runs: build with [arg1, arg2], then test with [arg3, arg4]
-```
-
-### Task Dependencies
-
-Tasks can declare dependencies that run first:
+Wait for a task if it's already running, but don't start it:
 
 ```toml
 [tasks.test]
 description = "Run tests"
-depends = ["build"]  # Runs build first
-run = "cargo test"
+wait_for = ["db-migrate"]  # If db-migrate is running, wait; don't start it
+run = "npm test"
 
-[tasks.build]
-description = "Build the project"
-run = "cargo build"
+[tasks.db-migrate]
+description = "Run migrations"
+run = "./migrate.sh"
 ```
 
-When you run `mise run test`:
-1. Mise checks dependencies: `test` depends on `build`
-2. Runs `build` first
-3. If `build` succeeds, runs `test`
+Useful when multiple developers might trigger tasks simultaneously.
 
-Dependencies run in parallel when possible:
+### Complex Dependency Graphs
 
-```toml
-[tasks.ci]
-depends = ["lint", "test", "check-types"]  # All 3 run in parallel
-```
-
-### Advanced Dependency Control
-
-Three types of dependencies:
-
-**`depends`** - Run before this task (parallel if possible):
 ```toml
 [tasks.deploy]
-depends = ["build", "test"]  # Both run in parallel before deploy
-```
+depends = ["build", "test"]        # Run before (parallel)
+depends_post = ["notify", "tag"]   # Run after (parallel)
+wait_for = ["db-migrate"]          # Wait if running
 
-**`depends_post`** - Run after this task:
-```toml
 [tasks.build]
-depends_post = ["notify"]  # Runs notify after build completes
-```
+depends = ["install", "codegen"]
 
-**`wait_for`** - Don't start until these finish, but don't add as dependencies:
-```toml
 [tasks.test]
-wait_for = ["db-setup"]  # If db-setup is running, wait for it, but don't start it
+depends = ["build"]
+
+[tasks.db-migrate]
+run = "db-migrate up"
 ```
 
-### Wildcards in Task Names
+Execution order for `mise run deploy`:
+1. `install` and `codegen` run in parallel
+2. `build` runs after both complete
+3. `test` runs after `build`
+4. `deploy` waits for `db-migrate` if running
+5. `deploy` runs after `build` and `test` complete
+6. `notify` and `tag` run in parallel after `deploy`
+
+## Wildcards and Pattern Matching
 
 Use glob patterns to match multiple tasks:
 
 ```bash
-# Run all test tasks
-mise run test:*
-
-# Run all tasks in test namespace
-mise run test:**
-
-# Run specific pattern
-mise run generate:{completions,docs:*}
+mise run test:*           # All test tasks
+mise run test:**          # All nested test tasks
+mise run lint:{js,css}    # Run lint:js and lint:css
 ```
 
-Wildcard patterns:
-- `?` - Match any single character
-- `*` - Match 0+ characters
-- `**` - Match 0+ groups (separated by `:`)
-- `{a,b,c}` - Match any of the alternatives
-- `[abc]` - Match any character in set
-- `[!abc]` - Match any character not in set
+### Pattern Syntax
 
-Example with dependencies:
+| Pattern | Description | Example Match |
+|---------|-------------|---------------|
+| `?` | Single character | `test?` → test1, test2 |
+| `*` | 0+ characters | `test:*` → test:unit, test:e2e |
+| `**` | 0+ groups | `test:**` → test:unit:db, test:e2e:api |
+| `{a,b}` | Alternatives | `{lint,test}` → lint, test |
+| `[abc]` | Character set | `test[123]` → test1, test2 |
+| `[!abc]` | Negation | `test[!3]` → test1, test2 |
+
+### Wildcard Dependencies
 
 ```toml
 [tasks."lint:eslint"]
-run = "eslint ."
+run = "eslint src/"
 
 [tasks."lint:prettier"]
-run = "prettier --check ."
+run = "prettier --check src/"
+
+[tasks."lint:tsc"]
+run = "tsc --noEmit"
 
 [tasks.lint]
-depends = ["lint:*"]  # Runs all lint:* tasks
+description = "Run all linters"
+depends = ["lint:*"]  # Runs all lint:* tasks in parallel
 ```
 
-## Task Output and Parallelism
+## Parallel Execution and Output
 
-### Parallel Execution
-
-By default, mise runs up to 4 tasks in parallel:
+### Tuning Parallelism
 
 ```bash
-# Use default (4 parallel jobs)
-mise run test
-
-# Custom parallelism
+# Set parallel job count
 mise run --jobs 8 test
+MISE_JOBS=8 mise run test
+mise settings set jobs 8
 
-# Sequential execution (one at a time)
+# Sequential execution
 mise run --jobs 1 test
 ```
 
-Set globally:
-```bash
-export MISE_JOBS=8
-# or
-mise settings set jobs 8
-```
+Default: 4 parallel jobs
 
 ### Output Modes
 
-**Line-buffered (default):**
+**Line-buffered (default)** - Prefixes each line with task name:
+
 ```bash
 mise run test
 # Output:
@@ -218,193 +143,157 @@ mise run test
 # [test:integration] Running integration tests...
 ```
 
-Each line is prefixed with the task name to avoid interleaving output.
+**Interleaved (raw)** - Shows output immediately:
 
-**Interleaved (raw output):**
 ```bash
 mise run --interleave test
-# Output appears immediately without prefixes
+# or
+export MISE_TASK_OUTPUT=interleave
 ```
 
 Use interleaved when:
-- Running a single task (`--jobs 1`)
+- Running a single task
 - Need interactive output
-- Debugging task execution
+- Debugging with real-time logs
 
-Set globally:
-```bash
-export MISE_TASK_OUTPUT=interleave
-# or
-mise settings set task_output interleave
-```
+### Standard Input Handling
 
-### Standard Input
-
-By default, tasks don't read from stdin. To enable:
+By default, tasks don't receive stdin. Enable with `raw = true`:
 
 ```toml
 [tasks.interactive]
-description = "Interactive task that needs stdin"
+description = "Interactive task"
 raw = true  # Enable stdin
 run = "read -p 'Enter name: ' name && echo Hello $name"
 ```
 
 When `raw = true`:
 - Task receives stdin
-- Runs exclusively (no parallel execution with other tasks)
-- Output redactions are disabled
+- Runs exclusively (no parallel execution)
+- Output redactions disabled
+- Useful for prompts, interactive CLIs, debuggers
 
-## Watching Files
+## File-Based Task Triggering
 
-### Using mise watch
-
-Automatically re-run tasks when files change:
-
-```bash
-# Watch and re-run on any change
-mise watch build
-
-# Watch specific task with args
-mise watch test -- --verbose
-```
-
-Requirements:
-- Install `watchexec`: `mise use -g watchexec@latest`
-
-When files change, mise will:
-1. Detect the change
-2. Wait for file system to settle
-3. Re-run the task
-
-### File-based Task Triggering
-
-Define sources and outputs to skip unnecessary runs:
+Use sources and outputs to skip unnecessary rebuilds:
 
 ```toml
 [tasks.build]
 description = "Build the CLI"
 run = "cargo build"
-sources = ['Cargo.toml', 'src/**/*.rs']
+sources = ['Cargo.toml', 'Cargo.lock', 'src/**/*.rs']
 outputs = ['target/debug/mycli']
 ```
 
-Mise compares timestamps:
-- If outputs are newer than sources, skips task
-- If sources changed, runs task
-- On first run or missing outputs, always runs
+### Timestamp Comparison
 
-Example workflow:
+Mise compares modification times:
+- If outputs are newer than sources → skip task
+- If sources changed → run task
+- On first run or missing outputs → always run
 
-```bash
-mise run build  # Runs (no output exists)
-mise run build  # Skips (output newer than sources)
-# Edit src/main.rs
-mise run build  # Runs (source changed)
+### Complex Source Patterns
+
+```toml
+[tasks.build-frontend]
+description = "Build frontend assets"
+sources = [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "package.json",
+    "tsconfig.json",
+    "!src/**/*.test.ts",    # Exclude tests
+    "!src/**/*.stories.tsx" # Exclude stories
+]
+outputs = [
+    "dist/**/*.js",
+    "dist/**/*.css",
+    "dist/manifest.json"
+]
+run = "npm run build"
 ```
 
-## Executing Commands
+### File Task Scripts with Sources
 
-### mise exec
-
-Run arbitrary commands with mise environment:
+For file-based tasks (`mise-tasks/build`):
 
 ```bash
-# Execute with mise tools
-mise exec -- node --version
+#!/usr/bin/env bash
+#MISE description="Build with caching"
+#MISE sources=["src/**/*.ts", "package.json"]
+#MISE outputs=["dist/**/*.js"]
+#MISE depends=["install"]
 
-# Execute with specific tool versions
-mise exec -- python script.py
-
-# Execute in different directory
-mise --cd /path/to/project exec -- go build
+set -euo pipefail
+npm run build
 ```
 
-Short alias:
-```bash
-mise x -- command args
-```
+## Task Configuration Reference
 
-### Use Cases
-
-**Test a command before adding a task:**
-```bash
-mise exec -- npm run build
-# Works? Add it as a task:
-# mise tasks add build npm run build
-```
-
-**Run with specific environment:**
-```bash
-MISE_ENV=production mise exec -- ./deploy.sh
-```
-
-**Debug tool availability:**
-```bash
-mise exec -- which node
-mise exec -- which python
-```
-
-## Task Configuration Deep Dive
-
-### Task Definition Options
-
-Full TOML task configuration:
+All available task options:
 
 ```toml
 [tasks.example]
 description = "Task description (REQUIRED)"
 alias = "ex"                    # Alternative name
-depends = ["other-task"]        # Dependencies
-depends_post = ["cleanup"]      # Post-dependencies
-wait_for = ["db"]               # Wait without dependency
-run = "echo 'Hello'"            # Command to run
-run = ["cmd1", "cmd2"]          # Multiple commands
+depends = ["other-task"]        # Pre-dependencies (parallel)
+depends_post = ["cleanup"]      # Post-dependencies (parallel)
+wait_for = ["db"]               # Wait without starting
+run = "echo 'Hello'"            # Command (string)
+run = ["cmd1", "cmd2"]          # Commands (array)
 dir = "{{config_root}}/sub"     # Working directory
 env = { VAR = "value" }         # Environment variables
-sources = ["src/**/*.ts"]       # Input files
-outputs = ["dist/**/*.js"]      # Output files
+sources = ["src/**/*.ts"]       # Input files (for caching)
+outputs = ["dist/**/*.js"]      # Output files (for caching)
 hide = false                    # Hide from task list
 raw = false                     # Enable stdin
 quiet = false                   # Suppress output
-shell = "bash -c"               # Shell to use (default)
+shell = "bash -c"               # Shell to use
 ```
 
-### Task Execution Context
+## Task Execution Context
 
 Environment variables available in tasks:
 
 ```bash
-# Mise variables
-MISE_PROJECT_ROOT      # Root of the project
+# Mise-provided variables
+MISE_PROJECT_ROOT      # Git root or directory with .mise.toml
 MISE_CONFIG_ROOT       # Directory containing mise.toml
 MISE_ORIGINAL_CWD      # Directory where mise run was called
 MISE_TASK_NAME         # Name of the current task
 MISE_TASK_DIR          # Directory containing task script (file tasks)
 MISE_TASK_FILE         # Full path to task script (file tasks)
 
-# User-defined
-# From [env] section in mise.toml
-# From task's env field
+# Tool paths
+PATH                   # Includes mise-managed tools
+# Plus all env vars from [env] section
 ```
 
-Example using context:
+### Using Context Variables
 
 ```toml
 [tasks.clean]
 description = "Clean build artifacts"
-run = "rm -rf {{config_root}}/dist"
+run = "rm -rf {{config_root}}/dist {{config_root}}/build"
 
-[tasks.test]
-description = "Run tests"
-env = { TEST_ENV = "test" }
-run = "npm test"
+[tasks.archive]
+description = "Create release archive"
+run = """
+cd {{config_root}}
+tar czf release-{{env.VERSION}}.tar.gz dist/
+"""
+
+[tasks.deploy]
+description = "Deploy from project root"
+dir = "{{project_root}}"
+run = "./scripts/deploy.sh"
 ```
 
-## Task Grouping and Organization
+## Task Organization Patterns
 
-### Semantic Grouping
+### Semantic Namespacing
 
-Use `:` to namespace tasks:
+Use `:` to create task hierarchies:
 
 ```toml
 [tasks."test:unit"]
@@ -415,47 +304,50 @@ run = "npm run test:unit"
 description = "Run integration tests"
 run = "npm run test:integration"
 
-[tasks."test:e2e"]
-description = "Run e2e tests"
+[tasks."test:e2e:local"]
+description = "Run e2e tests locally"
+run = "npm run test:e2e"
+
+[tasks."test:e2e:ci"]
+description = "Run e2e tests in CI"
+env = { CI = "1" }
 run = "npm run test:e2e"
 
 [tasks.test]
 description = "Run all tests"
-depends = ["test:*"]
-```
-
-Run specific groups:
-
-```bash
-mise run test:*           # All test tasks
-mise run test:unit        # Just unit tests
-mise run test:**:local    # All nested tasks ending in :local
+depends = ["test:*"]  # Matches test:unit, test:integration, test:e2e:*
 ```
 
 ### Hidden Tasks
 
-Hide implementation details:
+Hide implementation details from `mise tasks`:
 
 ```toml
-[tasks."_internal"]
-description = "Internal helper task"
+[tasks."_internal:setup"]
+description = "Internal setup task"
 hide = true
-run = "echo 'Internal'"
+run = "echo 'Setting up...'"
 
-[tasks.public]
-description = "Public task"
-depends = ["_internal"]
-run = "echo 'Public'"
+[tasks."_internal:cleanup"]
+description = "Internal cleanup task"
+hide = true
+run = "echo 'Cleaning up...'"
+
+[tasks.ci]
+description = "Run CI pipeline"
+depends = ["_internal:setup", "lint", "test"]
+depends_post = ["_internal:cleanup"]
 ```
 
 Hidden tasks:
 - Don't appear in `mise tasks` by default
 - Show with `mise tasks --hidden`
 - Still usable as dependencies
+- Prefix with `_` by convention
 
-## Debugging Task Execution
+## Debugging Complex Task Execution
 
-### Enable Debug Output
+### Debug Output Levels
 
 ```bash
 # Basic debugging
@@ -463,183 +355,419 @@ MISE_DEBUG=1 mise run build
 
 # Verbose tracing
 MISE_TRACE=1 mise run build
-
-# Both show:
-# - Task resolution
-# - Dependency order
-# - Command execution
-# - Environment setup
 ```
 
-### Common Issues
+Shows:
+- Task resolution and dependency order
+- Command execution and exit codes
+- Environment setup
+- File timestamp comparisons (sources/outputs)
+- Parallel execution scheduling
 
-**Task not found:**
+### Dependency Graph Visualization
+
 ```bash
-mise tasks              # List all tasks
-mise tasks --hidden     # Include hidden tasks
-mise tasks info <name>  # Show task details
+# Show dependency tree
+mise tasks deps build
+
+# Generate DOT graph
+mise tasks deps build --dot
+
+# Visualize with graphviz
+mise tasks deps build --dot | dot -Tpng > deps.png
 ```
 
-**Task fails:**
+### Testing Complex Dependencies
+
 ```bash
 # Check task definition
 mise tasks info build
 
-# Test command directly
-mise exec -- <command>
+# Test dependencies individually
+mise run <dependency>
 
-# Check dependencies
-mise tasks deps build
-
-# Enable debug output
-MISE_DEBUG=1 mise run build
-```
-
-**Wrong environment:**
-```bash
-# Check environment variables
-mise env
-
-# Check tool versions
-mise ls
-
-# Verify tools are in PATH
-mise exec -- which node
-```
-
-**Dependency issues:**
-```bash
-# Show dependency tree
-mise tasks deps <task>
+# Run with sequential execution to debug
+mise run --jobs 1 build
 
 # Check for circular dependencies
 # mise will error if detected
-
-# Run dependencies manually
-mise run <dependency>
 ```
 
-### Testing Tasks
-
-Before committing a task:
+### Debugging File-Based Triggering
 
 ```bash
-# 1. Format configuration
-mise fmt
+# Force run (ignore sources/outputs)
+rm dist/app  # Remove outputs
+mise run build
 
-# 2. Check for issues
-mise doctor
+# Check source/output timestamps
+ls -l src/main.ts dist/app
 
-# 3. Verify task has description
-mise tasks ls --json | jq '.[] | select(.name == "mytask")'
-
-# 4. Test execution
-mise run mytask
-
-# 5. Test with args
-mise run mytask -- --verbose
-
-# 6. Test dependencies
-mise tasks deps mytask
-mise run <dependency>
+# Enable debug to see timestamp comparison
+MISE_DEBUG=1 mise run build
 ```
 
-## Advanced Patterns
+## Advanced Execution Patterns
 
 ### Conditional Task Execution
 
-Use shell conditionals in tasks:
+Using shell conditionals:
 
 ```toml
 [tasks.build]
-description = "Build (skip if no changes)"
+description = "Build with platform detection"
 run = '''
-if [ -f dist/app ] && [ dist/app -nt src/main.ts ]; then
-  echo "Skipping build (no changes)"
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  npm run build:mac
+elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+  npm run build:linux
 else
-  npm run build
+  npm run build:generic
 fi
 '''
 ```
 
-Or use sources/outputs (preferred):
+Using MISE_ENV:
 
 ```toml
-[tasks.build]
-description = "Build (skip if no changes)"
-sources = ["src/**/*.ts"]
-outputs = ["dist/app"]
-run = "npm run build"
+[tasks.deploy]
+description = "Deploy to environment"
+run = '''
+case "$MISE_ENV" in
+  production)
+    ./deploy-prod.sh
+    ;;
+  staging)
+    ./deploy-staging.sh
+    ;;
+  *)
+    echo "Unknown environment: $MISE_ENV"
+    exit 1
+    ;;
+esac
+'''
 ```
 
-### Task Composition
+### Task Composition Patterns
 
-Compose complex workflows:
+**Sequential pipeline:**
 
 ```toml
 [tasks.ci]
-description = "Run CI pipeline"
-depends = ["lint", "test", "build"]  # Parallel
+description = "CI pipeline"
+run = [
+    "mise run lint",
+    "mise run test",
+    "mise run build",
+    "mise run security-scan"
+]
+```
 
+**Parallel with barrier:**
+
+```toml
 [tasks.deploy]
-description = "Deploy application"
-depends = ["ci"]  # Wait for CI
-run = ["mise run docker:build", "mise run docker:push"]
+description = "Deploy with validation"
+depends = ["build", "test", "security-scan"]  # Parallel
+run = "./deploy.sh"                            # Runs after all complete
+depends_post = ["smoke-test", "notify"]        # Parallel after deploy
+```
+
+**Complex multi-stage:**
+
+```toml
+[tasks.release]
+description = "Full release process"
+depends = ["ci", "version:bump"]
+run = [
+    "mise run changelog:generate",
+    "mise run build:release",
+    "mise run package",
+    "mise run publish"
+]
+depends_post = ["git:tag", "github:release", "notify:slack"]
 ```
 
 ### Multi-Environment Tasks
 
-```toml
-[tasks.deploy:staging]
-description = "Deploy to staging"
-env = { ENV = "staging" }
-run = "./deploy.sh"
+Using `MISE_ENV`:
 
-[tasks.deploy:production]
-description = "Deploy to production"
-env = { ENV = "production" }
-run = "./deploy.sh"
+```toml
+[env.development]
+API_URL = "http://localhost:3000"
+DB_HOST = "localhost"
+
+[env.staging]
+API_URL = "https://api.staging.example.com"
+DB_HOST = "db.staging.internal"
+
+[env.production]
+API_URL = "https://api.example.com"
+DB_HOST = "db.prod.internal"
+
+[tasks.deploy]
+description = "Deploy application"
+run = "./deploy.sh"  # Uses env vars from current MISE_ENV
 ```
 
-Or use `MISE_ENV`:
+Run with:
 
 ```bash
 MISE_ENV=production mise run deploy
 ```
 
-### Integration with External Tools
+Per-environment task variants:
 
 ```toml
-[tasks.docker:build]
-description = "Build Docker image"
-run = "docker build -t myapp:{{env.VERSION}} ."
+[tasks."deploy:staging"]
+description = "Deploy to staging"
+env = { ENV = "staging", API_URL = "https://api.staging.example.com" }
+run = "./deploy.sh"
 
-[tasks.docker:push]
-description = "Push Docker image"
-depends = ["docker:build"]
-run = "docker push myapp:{{env.VERSION}}"
-
-[tasks.k8s:deploy]
-description = "Deploy to Kubernetes"
-depends = ["docker:push"]
-run = "kubectl apply -f k8s/"
+[tasks."deploy:production"]
+description = "Deploy to production"
+env = { ENV = "production", API_URL = "https://api.example.com" }
+run = "./deploy.sh"
 ```
 
-## Performance Tips
+### Integration with External Tools
 
-1. **Use parallelism:** Set `MISE_JOBS` appropriately for your system
-2. **Leverage sources/outputs:** Avoid unnecessary rebuilds
-3. **Group related tasks:** Use dependencies to model relationships
-4. **Use file tasks for complex logic:** Better performance than inline shell scripts
-5. **Cache expensive operations:** Use mise's built-in caching with sources/outputs
-6. **Profile task execution:** Use `MISE_DEBUG=1` to see timings
+**Docker integration:**
 
-## Best Practices
+```toml
+[tasks."docker:build"]
+description = "Build Docker image"
+run = "docker build -t myapp:{{env.VERSION}} ."
+sources = ["Dockerfile", "src/**/*", "package.json"]
+outputs = [".docker-built"]  # Sentinel file
 
-1. **Always add descriptions:** Required and helps with documentation
-2. **Use task names consistently:** Namespace with `:` for organization
-3. **Model dependencies explicitly:** Makes workflows clear
-4. **Test tasks after creation:** Run them to ensure they work
-5. **Use `mise run` in scripts:** Avoid direct task invocation
-6. **Document complex tasks:** Add comments in TOML or task files
-7. **Keep tasks focused:** One task, one purpose; compose with dependencies
+[tasks."docker:push"]
+description = "Push Docker image"
+depends = ["docker:build"]
+run = [
+    "docker push myapp:{{env.VERSION}}",
+    "docker tag myapp:{{env.VERSION}} myapp:latest",
+    "docker push myapp:latest"
+]
+
+[tasks."docker:run"]
+description = "Run container locally"
+depends = ["docker:build"]
+run = "docker run -p 3000:3000 myapp:{{env.VERSION}}"
+```
+
+**Kubernetes integration:**
+
+```toml
+[tasks."k8s:deploy"]
+description = "Deploy to Kubernetes"
+depends = ["docker:push"]
+run = [
+    "kubectl apply -f k8s/",
+    "kubectl rollout status deployment/myapp"
+]
+
+[tasks."k8s:rollback"]
+description = "Rollback deployment"
+run = "kubectl rollout undo deployment/myapp"
+
+[tasks."k8s:logs"]
+description = "Stream logs"
+raw = true  # For interactive kubectl logs
+run = "kubectl logs -f deployment/myapp"
+```
+
+**CI/CD integration:**
+
+```toml
+[tasks.ci]
+description = "CI pipeline"
+depends = ["lint", "test", "build"]
+run = [
+    "mise run coverage:report",
+    "mise run security:scan"
+]
+
+[tasks."ci:github"]
+description = "GitHub Actions CI"
+env = { CI = "1", GITHUB_ACTIONS = "true" }
+run = [
+    "mise run ci",
+    "mise run coverage:upload"
+]
+
+[tasks."ci:gitlab"]
+description = "GitLab CI"
+env = { CI = "1", GITLAB_CI = "true" }
+run = [
+    "mise run ci",
+    "mise run artifacts:upload"
+]
+```
+
+## Performance Optimization
+
+### Parallel Execution Tuning
+
+```bash
+# Match CPU cores
+MISE_JOBS=$(nproc) mise run test
+
+# Conservative (less resource usage)
+MISE_JOBS=2 mise run test
+
+# Aggressive (faster, more resources)
+MISE_JOBS=16 mise run test
+```
+
+Set permanently:
+
+```bash
+mise settings set jobs $(nproc)
+```
+
+### Caching with Sources/Outputs
+
+Best practices:
+1. Always specify `sources` for tasks that read files
+2. Always specify `outputs` for tasks that write files
+3. Exclude irrelevant files (tests, docs) with `!` patterns
+4. Use sentinel files for non-file operations:
+
+```toml
+[tasks.install]
+description = "Install dependencies"
+sources = ["package.json", "package-lock.json"]
+outputs = ["node_modules/.installed"]  # Sentinel file
+run = [
+    "npm install",
+    "touch node_modules/.installed"
+]
+```
+
+### Task Granularity
+
+**Too fine-grained (slow):**
+
+```toml
+[tasks."lint:file1"]
+run = "eslint src/file1.ts"
+
+[tasks."lint:file2"]
+run = "eslint src/file2.ts"
+# ... hundreds of tasks
+```
+
+**Optimal (balanced):**
+
+```toml
+[tasks."lint:eslint"]
+run = "eslint src/"
+
+[tasks."lint:prettier"]
+run = "prettier --check src/"
+
+[tasks.lint]
+depends = ["lint:*"]
+```
+
+### Profiling Task Execution
+
+```bash
+# See timing information
+time mise run build
+
+# Enable debug for detailed timing
+MISE_DEBUG=1 mise run build 2>&1 | grep -E "took|elapsed"
+```
+
+## Common Pitfalls
+
+### Argument Passing Gotchas
+
+Arguments only go to the last command in multi-command tasks:
+
+```toml
+[tasks.test]
+run = [
+    "cargo build",
+    "cargo test"  # Args go here only
+]
+```
+
+Solution: Use separate tasks or explicit arguments:
+
+```toml
+[tasks.test]
+depends = ["build"]
+run = "cargo test"  # Now args work correctly
+```
+
+### Circular Dependencies
+
+mise detects circular dependencies:
+
+```toml
+[tasks.a]
+depends = ["b"]
+
+[tasks.b]
+depends = ["a"]  # ERROR: circular dependency
+```
+
+Fix by restructuring:
+
+```toml
+[tasks.prepare]
+run = "echo 'prep'"
+
+[tasks.a]
+depends = ["prepare"]
+
+[tasks.b]
+depends = ["prepare"]
+```
+
+### Missing Dependencies
+
+When tasks run in parallel, ensure dependencies are explicit:
+
+```toml
+# WRONG - race condition
+[tasks.test]
+run = "cargo test"
+
+[tasks.build]
+run = "cargo build"
+
+# RIGHT - explicit dependency
+[tasks.test]
+depends = ["build"]
+run = "cargo test"
+```
+
+### Environment Variable Scoping
+
+Task-specific env vars don't propagate to dependencies:
+
+```toml
+[tasks.a]
+env = { FOO = "bar" }
+depends = ["b"]  # b doesn't see FOO
+
+[tasks.b]
+run = "echo $FOO"  # Empty!
+```
+
+Solution: Set in [env] section or pass explicitly:
+
+```toml
+[env]
+FOO = "bar"
+
+[tasks.a]
+depends = ["b"]
+
+[tasks.b]
+run = "echo $FOO"  # Works!
+```

@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.3.0] - 2025-11-04
+
+### Added
+- **Task arguments (usage field) support** in SKILL.md
+  - Complete examples for TOML and file tasks with arguments
+  - KDL syntax documentation for `arg` and `flag` definitions
+  - Bash expansion patterns: `${usage_var?}`, `${usage_var:-default}`, `${usage_var:+value}`
+  - Enables creating professional tasks with automatic `--help` generation
+- **Tera→usage migration guide** in adding-capabilities.md
+  - 5 comprehensive migration examples covering all patterns
+  - Migration checklist and quick find/replace patterns
+  - Background on why Tera is deprecated (removal 2026.11.0)
+
+### Improved
+- **Context efficiency**: Streamlined SKILL.md from 206 → 148 lines (28% reduction)
+- **Progressive disclosure optimization**: Transformed all reference files to advanced-only content
+  - understanding-projects.md: Now focuses on config hierarchy, advanced version specs, edge cases
+  - running-commands.md: Advanced dependency control, wildcards, complex orchestration
+  - adding-capabilities.md: Advanced tool options, conditional installation, monorepo patterns
+- **Documentation clarity**: References now truly optional, loaded only for complex scenarios
+- **README**: Updated progressive disclosure section to reflect new architecture
+
+### Technical Details
+- SKILL.md is now self-sufficient for all basic workflows
+- Reference files contain only advanced topics and edge cases
+- Total reduction: ~40% in essential context size while maintaining comprehensive coverage
+
 ## [0.2.0] - 2025-11-03
 
 ### Added

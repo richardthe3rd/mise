@@ -1,953 +1,1052 @@
-# Adding Capabilities to Mise Projects
+# Adding Capabilities to Mise Projects - Advanced Topics
 
-Comprehensive guide to adding tools and tasks to mise projects.
+Advanced tool management, complex configurations, and edge cases.
 
-## Table of Contents
+> **Note**: For basic tool and task addition, use the main mise-workflow skill. This reference covers advanced scenarios only.
 
-1. [Adding Tools](#adding-tools)
-2. [Tool Backend Selection](#tool-backend-selection)
-3. [Creating Tasks](#creating-tasks)
-4. [TOML vs File Tasks](#toml-vs-file-tasks)
-5. [Task Patterns and Templates](#task-patterns-and-templates)
-6. [Validation Workflow](#validation-workflow)
+## Advanced Version Specifications
 
-## Adding Tools
+Beyond basic semantic versioning, mise supports several advanced version specifications:
 
-### Quick Commands
+### Git References
 
-```bash
-# Add runtime tools
-mise use node@20
-mise use python@3.11
-mise use go@latest
-
-# Add CLI tools (language backends)
-mise use npm:prettier
-mise use go:github.com/golangci/golangci-lint/cmd/golangci-lint
-mise use cargo:ripgrep
-mise use pipx:black
-
-# Add from GitHub releases
-mise use ubi:BurntSushi/ripgrep
-
-# Add to global config
-mise use -g node@20
-
-# Add and install immediately
-mise use node@20 && mise install
-```
-
-### Understanding Tool Types
-
-**Runtime Tools:**
-- Interpreters and compilers (node, python, go, ruby, java, rust)
-- Installed via mise's core backends
-- Manage multiple versions
-- Examples: `node`, `python`, `go`, `ruby`
-
-**CLI Tools:**
-- Command-line utilities (linters, formatters, build tools)
-- Installed via language package managers or registries
-- Project-specific or global
-- Examples: `prettier`, `eslint`, `golangci-lint`, `rg`
-
-**The Key Question:** Is this a runtime (version manager) or a CLI tool?
-
-## Tool Backend Selection
-
-### Decision Tree
-
-```
-Is it a runtime/interpreter (node, python, go, ruby, java)?
-├─ YES → Use core backend
-│  └─ Examples: mise use node@20, mise use python@3.11
-│
-└─ NO → Is it a CLI tool?
-   ├─ Installed via `npm install -g`?
-   │  └─ YES → Use npm: backend
-   │     └─ Example: mise use npm:prettier
-   │
-   ├─ Installed via `go install`?
-   │  └─ YES → Use go: backend
-   │     └─ Example: mise use go:github.com/user/tool/cmd/tool
-   │
-   ├─ Installed via `cargo install`?
-   │  └─ YES → Use cargo: backend
-   │     └─ Example: mise use cargo:ripgrep
-   │
-   ├─ Installed via `pipx install`?
-   │  └─ YES → Use pipx: backend
-   │     └─ Example: mise use pipx:black
-   │
-   ├─ Available on GitHub releases?
-   │  └─ YES → Use ubi: backend
-   │     └─ Example: mise use ubi:BurntSushi/ripgrep
-   │
-   └─ In aqua registry?
-      └─ YES → Use aqua: backend
-         └─ Example: mise use aqua:cli/cli
-```
-
-### Backend Reference
-
-#### Core Backends (Runtime Tools)
-
-**Supported runtimes:**
-- `node` - Node.js
-- `python` - Python
-- `ruby` - Ruby
-- `go` - Go
-- `java` - Java
-- `rust` - Rust
-- `deno` - Deno
-- `bun` - Bun
-- `elixir` - Elixir
-- `erlang` - Erlang
-- Plus many more...
-
-**Usage:**
-```bash
-mise use <tool>@<version>
-```
-
-**Version formats:**
-```bash
-mise use node@20           # Latest 20.x.x
-mise use node@20.11        # Latest 20.11.x
-mise use node@20.11.0      # Exact version
-mise use node@latest       # Latest stable
-mise use node@~20.11       # Latest 20.11.x (semver tilde)
-mise use node@^20.11       # Latest 20.x where x >= 11 (semver caret)
-```
-
-**Configuration:**
-```toml
-[tools]
-node = "20"
-python = "3.11.5"
-go = "latest"
-```
-
-#### npm: Backend (Node.js CLI Tools)
-
-**When to use:**
-- Tool is published to npmjs.org
-- Normally installed with `npm install -g <package>`
-- Examples: prettier, eslint, typescript, webpack-cli
-
-**Requirements:**
-- Node.js must be installed (via mise or system)
-
-**Usage:**
-```bash
-# Add npm tool
-mise use npm:prettier
-mise use npm:eslint
-mise use npm:typescript@5.0.0
-
-# With version
-mise use npm:prettier@3.0.0
-```
-
-**Configuration:**
-```toml
-[tools]
-node = "20"  # npm requires node
-"npm:prettier" = "latest"
-"npm:eslint" = "8.50.0"
-"npm:typescript" = "~5.0"
-```
-
-**Common npm tools:**
-- `npm:prettier` - Code formatter
-- `npm:eslint` - JavaScript linter
-- `npm:typescript` - TypeScript compiler
-- `npm:webpack-cli` - Webpack CLI
-- `npm:@angular/cli` - Angular CLI
-- `npm:create-react-app` - React app generator
-- `npm:nodemon` - Node.js monitor
-- `npm:pm2` - Process manager
-
-#### go: Backend (Go CLI Tools)
-
-**When to use:**
-- Tool is installed via `go install`
-- Tool has a GitHub repository with Go code
-- Examples: golangci-lint, goreleaser, staticcheck
-
-**Requirements:**
-- Go must be installed (via mise or system)
-
-**Usage:**
-```bash
-# Full import path
-mise use go:github.com/golangci/golangci-lint/cmd/golangci-lint
-
-# With version
-mise use go:github.com/golangci/golangci-lint/cmd/golangci-lint@v1.54.2
-
-# With build tags
-# (configure in mise.toml)
-```
-
-**Configuration:**
-```toml
-[tools]
-go = "latest"  # go backend requires go
-"go:github.com/golangci/golangci-lint/cmd/golangci-lint" = "latest"
-"go:github.com/goreleaser/goreleaser" = "v1.20.0"
-
-# With build tags
-"go:github.com/golang-migrate/migrate/v4/cmd/migrate" = { version = "latest", tags = "postgres" }
-```
-
-**Common go tools:**
-- `go:github.com/golangci/golangci-lint/cmd/golangci-lint` - Go linter
-- `go:github.com/goreleaser/goreleaser` - Release automation
-- `go:golang.org/x/tools/cmd/goimports` - Import formatter
-- `go:github.com/cosmtrek/air` - Live reload
-- `go:github.com/swaggo/swag/cmd/swag` - Swagger generator
-- `go:gotest.tools/gotestsum` - Test runner
-- `go:github.com/sqlc-dev/sqlc/cmd/sqlc` - SQL compiler
-
-#### cargo: Backend (Rust CLI Tools)
-
-**When to use:**
-- Tool is published to crates.io
-- Normally installed with `cargo install <crate>`
-- Examples: ripgrep, fd, bat, cargo-watch
-
-**Requirements:**
-- Rust (cargo) must be installed (via mise or system)
-
-**Usage:**
-```bash
-# Add cargo tool
-mise use cargo:ripgrep
-mise use cargo:fd-find
-mise use cargo:bat
-
-# With version
-mise use cargo:ripgrep@14.0.0
-```
-
-**Configuration:**
-```toml
-[tools]
-rust = "latest"  # cargo backend requires rust
-"cargo:ripgrep" = "latest"
-"cargo:fd-find" = "8.7.0"
-"cargo:bat" = "latest"
-```
-
-**Common cargo tools:**
-- `cargo:ripgrep` - Fast grep alternative (rg)
-- `cargo:fd-find` - Fast find alternative (fd)
-- `cargo:bat` - Cat clone with syntax highlighting
-- `cargo:exa` - Modern ls alternative
-- `cargo:tokei` - Code statistics
-- `cargo:hyperfine` - Benchmarking tool
-- `cargo:cargo-watch` - Watch and rebuild
-- `cargo:cargo-edit` - Cargo command extensions
-
-#### pipx: Backend (Python CLI Tools)
-
-**When to use:**
-- Python CLI tool/application
-- Normally installed with `pipx install <package>`
-- Should run in isolated environment
-- Examples: black, flake8, poetry, aws-cli
-
-**Requirements:**
-- Python must be installed (via mise or system)
-- pipx must be installed (mise can install it)
-
-**Usage:**
-```bash
-# Add pipx tool
-mise use pipx:black
-mise use pipx:flake8
-mise use pipx:poetry
-
-# With version
-mise use pipx:black@23.0.0
-```
-
-**Configuration:**
-```toml
-[tools]
-python = "3.11"  # pipx requires python
-"pipx:black" = "latest"
-"pipx:flake8" = "6.1.0"
-"pipx:poetry" = "latest"
-"pipx:aws-cli" = "latest"
-```
-
-**Common pipx tools:**
-- `pipx:black` - Python code formatter
-- `pipx:flake8` - Python linter
-- `pipx:mypy` - Static type checker
-- `pipx:poetry` - Python dependency manager
-- `pipx:pipenv` - Python virtualenv manager
-- `pipx:cookiecutter` - Project template tool
-- `pipx:aws-cli` - AWS command line
-
-#### ubi: Backend (GitHub Releases)
-
-**When to use:**
-- Tool releases binaries on GitHub Releases
-- No package manager available
-- Examples: GitHub CLI, Kubernetes tools, HashiCorp tools
-
-**Usage:**
-```bash
-# GitHub repo format: owner/repo
-mise use ubi:BurntSushi/ripgrep
-mise use ubi:cli/cli
-mise use ubi:junegunn/fzf
-
-# With version
-mise use ubi:cli/cli@v2.35.0
-```
-
-**Configuration:**
-```toml
-[tools]
-"ubi:cli/cli" = "latest"           # GitHub CLI
-"ubi:junegunn/fzf" = "latest"      # Fuzzy finder
-"ubi:BurntSushi/ripgrep" = "14.0.0"
-```
-
-**Common ubi tools:**
-- `ubi:cli/cli` - GitHub CLI (gh)
-- `ubi:junegunn/fzf` - Fuzzy finder
-- `ubi:sharkdp/fd` - Find alternative
-- `ubi:sharkdp/bat` - Cat alternative
-- `ubi:dandavison/delta` - Git diff viewer
-- `ubi:starship/starship` - Cross-shell prompt
-
-#### aqua: Backend (Aqua Registry)
-
-**When to use:**
-- Tool is in the aqua registry
-- Want access to 20,000+ packages
-- Prefer registry-based management
-
-**Usage:**
-```bash
-mise use aqua:cli/cli
-mise use aqua:golangci/golangci-lint
-```
-
-**Configuration:**
-```toml
-[tools]
-"aqua:cli/cli" = "latest"
-"aqua:golangci/golangci-lint" = "v1.54.2"
-```
-
-**Search aqua registry:**
-Visit: https://aquaproj.github.io/
-
-### Version Specification
-
-**Common patterns:**
+Use specific git branches, tags, or commits:
 
 ```toml
 [tools]
-# Exact version
-node = "20.11.0"
+# Git branch
+node = "ref:main"
+node = "ref:feature/new-api"
 
-# Major version (latest patch)
-node = "20"
+# Git tag
+node = "ref:v20.11.0"
 
-# Major.minor (latest patch)
-node = "20.11"
-
-# Latest stable
-node = "latest"
-
-# Semver tilde (~) - latest patch version
-node = "~20.11"     # Matches 20.11.x
-
-# Semver caret (^) - latest minor version
-node = "^20.11"     # Matches 20.x where x >= 11
-
-# Version prefix
-node = "prefix:20"  # Finds latest version starting with 20
-
-# Path to local build
-node = "path:~/.local/share/node/custom"
-
-# System version
-node = "system"     # Use system-installed version
+# Git commit
+node = "ref:abc123def456"
 ```
+
+Useful for:
+- Testing pre-release versions
+- Using custom forks
+- Pinning to specific commits for reproducibility
+
+### Local Paths
+
+Use locally built or custom tool versions:
+
+```toml
+[tools]
+# Absolute path
+node = "path:/usr/local/custom-node"
+
+# Relative path (from config root)
+node = "path:./vendor/node"
+
+# Home directory
+node = "path:~/.local/share/custom-builds/node"
+```
+
+Use cases:
+- Custom builds with patches
+- Vendored tools
+- Offline development
+- Testing local modifications
+
+### System Versions
+
+Use system-installed tools instead of mise-managed:
+
+```toml
+[tools]
+node = "system"     # Use system node
+python = "system"   # Use system python
+```
+
+When to use:
+- Tool installed by system package manager
+- Organization requires specific system tools
+- Avoid duplication in containers
+
+### Version Prefixes
+
+Match versions by prefix:
+
+```toml
+[tools]
+# Matches latest version starting with "20"
+node = "prefix:20"
+
+# Matches latest 20.11.x
+node = "prefix:20.11"
+
+# Matches latest v1.2.x (with 'v' prefix)
+go = "prefix:v1.2"
+```
+
+Difference from semantic versioning:
+- `prefix:20` matches 20.11.0, 20.9.5, 20.1.0
+- `20` (semantic) resolves to latest 20.x.x (e.g., 20.11.0)
+
+### Sub-versions
+
+Pin to specific sub-versions for reproducibility:
+
+```toml
+[tools]
+# Exact version with sub-version
+node = "20.11.0-alpine"
+python = "3.11.5-dev"
+```
+
+## Advanced Tool Configuration
 
 ### Tool Options
 
-Some backends support additional options:
+Backends support custom options for specialized configurations:
+
+#### Go Backend: Build Tags
 
 ```toml
 [tools]
-# Go backend: build tags
+# Single tag
 "go:github.com/golang-migrate/migrate/v4/cmd/migrate" = {
     version = "latest",
-    tags = "postgres,mysql"
+    tags = "postgres"
 }
 
-# Custom tool options
+# Multiple tags
+"go:github.com/golang-migrate/migrate/v4/cmd/migrate" = {
+    version = "v4.16.0",
+    tags = "postgres,mysql,mongodb"
+}
+
+# With specific version
+"go:github.com/someorg/tool/cmd/tool" = {
+    version = "v1.2.3",
+    tags = "enterprise,feature_x"
+}
+```
+
+#### Conditional Tool Installation
+
+Install tools based on conditions:
+
+```toml
+[tools]
+# Only on specific OS
+"cargo:cargo-watch" = { version = "latest", os = ["linux", "macos"] }
+"cargo:windows-specific-tool" = { version = "latest", os = ["windows"] }
+
+# Only in specific environment
+"npm:@sentry/cli" = { version = "latest", if = "{{ env.CI == '1' }}" }
+"ubi:cli/cli" = { version = "latest", if = "{{ env.DEPLOY == 'true' }}" }
+
+# Architecture-specific
+python = { version = "3.11", if = "{{ arch == 'x86_64' }}" }
+python = { version = "3.11-arm64", if = "{{ arch == 'arm64' }}" }
+```
+
+#### Python Backend: Virtualenv Options
+
+```toml
+[tools]
+# Custom virtualenv location
 python = { version = "3.11", virtualenv = ".venv" }
+
+# Multiple Python versions with separate virtualenvs
+"python:3.11" = { version = "3.11.5", virtualenv = ".venv-3.11" }
+"python:3.12" = { version = "3.12.0", virtualenv = ".venv-3.12" }
 ```
 
-## Creating Tasks
+### Multi-Tool Dependency Chains
 
-### Quick Task Creation
+Ensure tools are installed in correct order:
 
-**Via CLI:**
-```bash
-# Simple task
-mise tasks add build npm run build
-
-# Task with dependencies
-mise tasks add test --depends build -- npm test
-
-# Task with description
-mise tasks add lint --description "Run linting" -- npm run lint
-
-# Task with multiple commands
-mise tasks add ci --depends "lint" --depends "test" -- mise run build
-```
-
-**Via mise.toml:**
-```bash
-# Edit mise.toml directly
-$EDITOR mise.toml
-```
-
-### Task Creation Methods
-
-**Method 1: Inline TOML (Simple)**
 ```toml
-[tasks.build]
-description = "Build the application"
-run = "npm run build"
+[tools]
+# First install rust (required by cargo tools)
+rust = "latest"
+
+# Then cargo tools (depend on rust)
+"cargo:ripgrep" = "latest"
+"cargo:fd-find" = "latest"
+
+# Go must be installed first
+go = "1.21"
+
+# Then go tools
+"go:github.com/golangci/golangci-lint/cmd/golangci-lint" = "latest"
+
+# Node for npm tools
+node = "20"
+
+# npm tools require node
+"npm:prettier" = "latest"
+"npm:eslint" = "8.50.0"
 ```
 
-**Method 2: Detailed TOML (Complex)**
+Tool order in `[tools]` section matters - mise installs top to bottom.
+
+### Backend-Specific Repositories
+
+Use custom registries or repositories:
+
 ```toml
-[tasks.build]
-description = "Build the application"
-depends = ["install"]
-run = ["npm run build", "npm run bundle"]
-sources = ["src/**/*.ts"]
-outputs = ["dist/**/*.js"]
-env = { NODE_ENV = "production" }
+[tools]
+# npm: custom registry
+"npm:@company/private-tool" = { version = "latest", registry = "https://npm.company.com" }
+
+# go: private repository
+"go:github.company.com/team/tool/cmd/tool" = "latest"
+
+# cargo: git dependency
+"cargo:custom-tool" = { version = "latest", git = "https://github.com/user/tool" }
 ```
 
-**Method 3: File Task (Very Complex)**
-```bash
-# Create mise-tasks/build
-#!/usr/bin/env bash
-#MISE description="Build the application"
-#MISE depends=["install"]
+### Version Constraints for Multiple Environments
 
-set -euo pipefail
-
-echo "Building..."
-npm run build
-npm run bundle
-echo "Build complete!"
-```
-
-## TOML vs File Tasks
-
-### Decision Matrix
-
-| Factor | TOML Tasks | File Tasks |
-|--------|------------|------------|
-| **Complexity** | Simple (< 10 lines) | Complex (loops, conditionals) |
-| **Language** | Shell only | Any language (Python, Ruby, etc.) |
-| **IDE Support** | Limited | Full (syntax highlighting, linting) |
-| **Testing** | Difficult | Easy (can run directly) |
-| **Configuration** | In mise.toml | In #MISE comments |
-| **Visibility** | All in one file | Separate files |
-| **Reusability** | Template functions | Full scripting |
-
-### When to Use TOML Tasks
-
-✅ Use TOML tasks when:
-- Task is a single command or simple script
-- No complex control flow needed
-- Want all configuration in one file
-- Task is short (< 10 lines)
-- Simple environment variable usage
-
-Examples:
 ```toml
-# Single command
-[tasks.test]
-description = "Run tests"
-run = "npm test"
+[tools]
+# Default (development)
+node = "20"
 
-# Multiple simple commands
-[tasks.lint]
-description = "Run linters"
-run = [
-    "eslint src/",
-    "prettier --check src/",
-]
+[env.staging.tools]
+# Override for staging
+node = "20.11.0"
 
-# With templates
-[tasks.build]
-description = "Build application"
-run = "go build -o {{vars.output_dir}}/{{vars.app_name}}"
+[env.production.tools]
+# Pin exact version for production
+node = "20.11.0"
 ```
 
-### When to Use File Tasks
+## Advanced File Task Configuration
 
-✅ Use file tasks when:
-- Task has complex logic (loops, conditionals, functions)
-- Need multi-line shell scripts
-- Want to use non-shell languages (Python, Ruby, etc.)
-- Need IDE support (syntax highlighting, linting)
-- Task is easier to test as a standalone script
-- Task is > 10 lines
+### Complete File Task Metadata
 
-Examples:
-
-**Complex Shell Script:**
-```bash
-#!/usr/bin/env bash
-#MISE description="Deploy application"
-#MISE depends=["build", "test"]
-
-set -euo pipefail
-
-# Complex logic
-if [ "$MISE_ENV" = "production" ]; then
-    echo "Deploying to production..."
-    ./scripts/deploy-prod.sh
-elif [ "$MISE_ENV" = "staging" ]; then
-    echo "Deploying to staging..."
-    ./scripts/deploy-staging.sh
-else
-    echo "Unknown environment: $MISE_ENV"
-    exit 1
-fi
-
-# Loop through services
-for service in api web worker; do
-    echo "Restarting $service..."
-    systemctl restart "myapp-$service"
-done
-```
-
-**Python Script:**
-```python
-#!/usr/bin/env python3
-#MISE description="Process data files"
-#MISE sources=["data/*.csv"]
-#MISE outputs=["processed/*.json"]
-
-import sys
-import glob
-import json
-
-# Complex data processing
-for file in glob.glob("data/*.csv"):
-    with open(file) as f:
-        # Process CSV...
-        data = process_csv(f.read())
-
-    output = file.replace("data/", "processed/").replace(".csv", ".json")
-    with open(output, "w") as f:
-        json.dump(data, f)
-```
-
-### File Task Metadata
-
-All configuration for file tasks goes in `#MISE` comments:
+All available options in `#MISE` comments:
 
 ```bash
 #!/usr/bin/env bash
-#MISE description="Task description (REQUIRED)"
-#MISE depends=["dep1", "dep2"]
-#MISE depends_post=["cleanup"]
-#MISE sources=["src/**/*.ts"]
-#MISE outputs=["dist/**/*.js"]
+#MISE description="Complex build task"
+#MISE alias="b"
+#MISE depends=["install", "codegen"]
+#MISE depends_post=["notify", "cleanup"]
+#MISE wait_for=["db-migrate"]
+#MISE sources=["src/**/*.ts", "!src/**/*.test.ts"]
+#MISE outputs=["dist/**/*.js", "dist/manifest.json"]
+#MISE dir="{{config_root}}/packages/app"
+#MISE env={NODE_ENV="production", DEBUG="false", VERBOSE="1"}
 #MISE hide=false
 #MISE raw=false
 #MISE quiet=false
-#MISE env={DEBUG="1", VERBOSE="true"}
-
-# Your script here
-```
-
-**Make executable:**
-```bash
-chmod +x mise-tasks/taskname
-```
-
-## Task Patterns and Templates
-
-### Common Task Patterns
-
-#### Build Task
-
-```toml
-[tasks.build]
-description = "Build the application"
-depends = ["install"]
-sources = ["src/**/*", "package.json"]
-outputs = ["dist/**/*"]
-run = "npm run build"
-```
-
-#### Test Task
-
-```toml
-[tasks.test]
-description = "Run all tests"
-depends = ["build"]
-run = "npm test"
-
-[tasks."test:unit"]
-description = "Run unit tests"
-run = "npm run test:unit"
-
-[tasks."test:integration"]
-description = "Run integration tests"
-depends = ["docker:up"]
-run = "npm run test:integration"
-depends_post = ["docker:down"]
-
-[tasks."test:e2e"]
-description = "Run end-to-end tests"
-depends = ["build", "docker:up"]
-run = "npm run test:e2e"
-depends_post = ["docker:down"]
-```
-
-#### Lint Task
-
-```toml
-[tasks.lint]
-description = "Run all linters"
-depends = ["lint:*"]
-
-[tasks."lint:eslint"]
-description = "Lint JavaScript/TypeScript"
-run = "eslint src/"
-
-[tasks."lint:prettier"]
-description = "Check code formatting"
-run = "prettier --check src/"
-
-[tasks."lint:types"]
-description = "Check TypeScript types"
-run = "tsc --noEmit"
-
-[tasks.lint-fix]
-description = "Fix linting issues"
-run = [
-    "eslint --fix src/",
-    "prettier --write src/",
-]
-```
-
-#### Watch Task
-
-```toml
-[tasks.dev]
-description = "Start development server"
-run = "npm run dev"
-
-[tasks.watch]
-description = "Watch and rebuild on changes"
-run = "npm run build"
-sources = ["src/**/*"]
-# Then use: mise watch watch
-```
-
-#### Docker Tasks
-
-```toml
-[tasks."docker:build"]
-description = "Build Docker image"
-run = "docker build -t myapp:{{env.VERSION}} ."
-
-[tasks."docker:push"]
-description = "Push Docker image"
-depends = ["docker:build"]
-run = "docker push myapp:{{env.VERSION}}"
-
-[tasks."docker:up"]
-description = "Start Docker services"
-run = "docker-compose up -d"
-
-[tasks."docker:down"]
-description = "Stop Docker services"
-run = "docker-compose down"
-```
-
-#### CI/CD Task
-
-```toml
-[tasks.ci]
-description = "Run CI pipeline"
-depends = ["lint", "test", "build"]
-
-[tasks.deploy]
-description = "Deploy application"
-depends = ["ci"]
-run = "./scripts/deploy.sh"
-confirm = "Are you sure you want to deploy?"
-```
-
-#### Pre-commit Task
-
-```toml
-[tasks.pre-commit]
-description = "Run before committing"
-depends = ["lint-fix", "test:unit"]
-run = "git add -u"
-```
-
-#### Clean Task
-
-```toml
-[tasks.clean]
-description = "Clean build artifacts"
-run = [
-    "rm -rf dist/",
-    "rm -rf node_modules/.cache/",
-    "rm -rf .mise/cache/",
-]
-
-[tasks.clean-all]
-description = "Clean everything including dependencies"
-depends = ["clean"]
-run = "rm -rf node_modules/"
-```
-
-### Template Variables
-
-Use templates in task definitions:
-
-```toml
-[vars]
-app_name = "myapp"
-version = "1.0.0"
-build_dir = "dist"
-
-[env]
-API_URL = "http://localhost:3000"
-VERSION = "{{vars.version}}"
-
-[tasks.build]
-description = "Build {{vars.app_name}}"
-run = "npm run build -- --out {{vars.build_dir}}"
-
-[tasks.version]
-description = "Show version"
-run = "echo 'Version: {{vars.version}}'"
-
-[tasks.deploy]
-description = "Deploy to {{env.API_URL}}"
-run = "./deploy.sh {{env.API_URL}}"
-```
-
-**Available template functions:**
-
-```toml
-# Execute command
-VERSION = "{{exec(command='git describe --tags')}}"
-
-# Config root directory
-BUILD_PATH = "{{config_root}}/dist"
-
-# Current working directory
-CWD = "{{cwd}}"
-
-# Environment variable
-HOME_DIR = "{{env.HOME}}"
-
-# Vars
-OUTPUT = "{{vars.build_dir}}"
-
-# Conditionals
-ENV_TYPE = "{{if(cond=env.PROD, t='production', f='development')}}"
-
-# OS/Arch
-PLATFORM = "{{os}}"  # linux, macos, windows
-ARCH = "{{arch}}"    # x86_64, arm64
-```
-
-### Multi-Environment Tasks
-
-```toml
-[env]
-API_URL = "http://localhost:3000"
-
-[env.staging]
-API_URL = "https://api.staging.example.com"
-
-[env.production]
-API_URL = "https://api.example.com"
-
-[tasks.deploy]
-description = "Deploy to {{env.API_URL}}"
-run = "./deploy.sh"
-```
-
-Usage:
-```bash
-# Deploy to staging
-MISE_ENV=staging mise run deploy
-
-# Deploy to production
-MISE_ENV=production mise run deploy
-```
-
-## Validation Workflow
-
-After adding tools or tasks, ALWAYS follow this workflow:
-
-### Step 1: Format Configuration
-
-```bash
-mise fmt
-```
-
-This formats `mise.toml` to standard style:
-- Sorts sections
-- Aligns formatting
-- Fixes basic syntax issues
-
-### Step 2: Check for Issues
-
-```bash
-mise doctor
-```
-
-Checks for:
-- Missing tools
-- Configuration errors
-- Path issues
-- Plugin problems
-
-### Step 3: Verify Task Descriptions
-
-**All tasks MUST have descriptions.** Verify:
-
-```bash
-mise tasks ls --json | jq '.[] | select(.description == null or .description == "")'
-```
-
-If any tasks appear, add descriptions to them.
-
-### Step 4: Test Tool Installation
-
-```bash
-# Check if tools are installed
-mise ls --missing
-
-# Install any missing tools
-mise install
-
-# Verify tools work
-mise exec -- <tool> --version
-```
-
-### Step 5: Test Task Execution
-
-```bash
-# Test the new task
-mise run <task-name>
-
-# Test with arguments
-mise run <task-name> -- --arg value
-
-# Test dependencies
-mise tasks deps <task-name>
-
-# Enable debug output if issues
-MISE_DEBUG=1 mise run <task-name>
-```
-
-### Step 6: Verify Task Configuration
-
-```bash
-# Show task details
-mise tasks info <task-name>
-
-# Show as JSON
-mise tasks info <task-name> --json
-
-# Verify in task list
-mise tasks | grep <task-name>
-```
-
-### Complete Validation Script
-
-```bash
-#!/usr/bin/env bash
-# validate-mise.sh
 
 set -euo pipefail
 
-echo "==> Formatting configuration..."
-mise fmt
-
-echo "==> Checking health..."
-mise doctor
-
-echo "==> Checking for tasks without descriptions..."
-MISSING_DESC=$(mise tasks ls --json | jq -r '.[] | select(.description == null or .description == "") | .name')
-if [ -n "$MISSING_DESC" ]; then
-    echo "ERROR: Tasks without descriptions:"
-    echo "$MISSING_DESC"
-    exit 1
-fi
-
-echo "==> Checking for missing tools..."
-MISSING_TOOLS=$(mise ls --missing 2>&1 || true)
-if [ -n "$MISSING_TOOLS" ]; then
-    echo "WARNING: Missing tools:"
-    echo "$MISSING_TOOLS"
-    echo "Run: mise install"
-fi
-
-echo "==> Testing tasks..."
-for task in $(mise tasks ls --json | jq -r '.[].name'); do
-    echo "  Testing $task..."
-    mise tasks info "$task" > /dev/null || echo "    ERROR: Failed to get info"
-done
-
-echo "✅ Validation complete!"
+# Complex build logic here
+echo "Building from $MISE_CONFIG_ROOT..."
 ```
 
-## Best Practices Summary
+### Multi-Language File Tasks
 
-### Tools
-1. **Choose the right backend** - Match tool source to backend
-2. **Specify versions explicitly** - Avoid `latest` in production
-3. **Document tool choices** - Comment why each tool is needed
-4. **Test tools after adding** - Verify with `mise exec -- tool --version`
-5. **Group related tools** - Keep runtime and CLI tools organized
+**Ruby task:**
 
-### Tasks
-1. **Always add descriptions** - REQUIRED for all tasks
-2. **Use semantic names** - Namespace with `:` for organization
-3. **Model dependencies** - Use `depends` to show relationships
-4. **Keep tasks focused** - One task, one purpose
-5. **Use TOML for simple, files for complex** - Follow decision matrix
-6. **Test tasks after creation** - Run them to ensure they work
-7. **Format and validate** - Run `mise fmt && mise doctor`
+```ruby
+#!/usr/bin/env ruby
+#MISE description="Process data with Ruby"
+#MISE sources=["data/**/*.csv"]
+#MISE outputs=["processed/**/*.json"]
 
-### Configuration
-1. **Format consistently** - Always run `mise fmt`
-2. **Validate before committing** - Run `mise doctor`
-3. **Use templates for DRY** - Leverage `[vars]` and templates
-4. **Environment-specific config** - Use `[env.<name>]` sections
-5. **Comment complex setups** - Explain non-obvious choices
+require 'csv'
+require 'json'
+
+# Process CSV files...
+Dir.glob("data/*.csv").each do |file|
+  # Processing logic
+end
+```
+
+**Node.js task:**
+
+```javascript
+#!/usr/bin/env node
+//MISE description="Build with Node.js"
+//MISE depends=["install"]
+//MISE sources=["src/**/*.ts"]
+//MISE outputs=["dist/**/*.js"]
+
+const fs = require('fs');
+const path = require('path');
+
+// Build logic here
+```
+
+**Python task with complex dependencies:**
+
+```python
+#!/usr/bin/env python3
+#MISE description="Data pipeline task"
+#MISE depends=["fetch-data", "validate-schema"]
+#MISE sources=["data/raw/**/*.csv"]
+#MISE outputs=["data/processed/**/*.parquet"]
+#MISE env={PYTHONPATH="./src", LOG_LEVEL="INFO"}
+
+import sys
+import pandas as pd
+from pathlib import Path
+
+# Complex data processing
+```
+
+### Task Script Templating
+
+Use mise templates in file task scripts:
+
+```bash
+#!/usr/bin/env bash
+#MISE description="Deploy application"
+#MISE env={VERSION="{{vars.version}}", ENV="{{env.DEPLOY_ENV}}"}
+
+set -euo pipefail
+
+# Template variables are expanded before execution
+echo "Deploying version $VERSION to $ENV"
+
+# Access mise variables
+cd "$MISE_PROJECT_ROOT"
+./scripts/deploy.sh \
+    --version "$VERSION" \
+    --environment "$ENV" \
+    --region "{{vars.aws_region}}"
+```
+
+## Complex Template Usage
+
+### Advanced Template Functions
+
+```toml
+[vars]
+# Execute commands
+git_sha = "{{exec(command='git rev-parse HEAD')}}"
+git_branch = "{{exec(command='git branch --show-current')}}"
+build_date = "{{exec(command='date +%Y%m%d')}}"
+package_version = "{{exec(command='jq -r .version package.json')}}"
+
+# Hash for cache busting
+content_hash = "{{hash(value=config_root)}}"
+lockfile_hash = "{{hash_file(file='package-lock.json')}}"
+
+# Conditionals
+deploy_env = "{{if(cond=env.PROD, t='production', f='development')}}"
+debug_flag = "{{if(cond=vars.debug_mode, t='--debug', f='')}}"
+
+# OS/Arch detection
+binary_name = "app-{{os}}-{{arch}}"
+build_target = "{{os}}-{{arch}}"
+
+# Path manipulation
+project_bin = "{{project_root}}/bin"
+cache_dir = "{{config_root}}/.cache"
+```
+
+### Nested Template References
+
+```toml
+[vars]
+version = "1.0.0"
+env_suffix = "{{if(cond=env.PROD, t='prod', f='dev')}}"
+full_version = "{{vars.version}}-{{vars.env_suffix}}"
+
+[tasks.build]
+description = "Build version {{vars.full_version}}"
+run = "npm run build -- --version {{vars.full_version}}"
+```
+
+### Template Functions in Task Commands
+
+```toml
+[tasks.deploy]
+description = "Deploy to environment"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Variables are expanded before execution
+VERSION="{{exec(command='git describe --tags')}}"
+COMMIT="{{exec(command='git rev-parse --short HEAD')}}"
+DATE="{{exec(command='date -u +%Y-%m-%dT%H:%M:%SZ')}}"
+
+echo "Deploying $VERSION ($COMMIT) built on $DATE"
+./deploy.sh --version "$VERSION" --commit "$COMMIT"
+"""
+```
+
+## Monorepo Tool Management
+
+### Root Configuration
+
+```toml
+# root mise.toml
+[tools]
+# Shared tools for all packages
+node = "20"
+"npm:prettier" = "latest"
+"npm:eslint" = "latest"
+
+[tasks.test-all]
+description = "Test all packages"
+run = [
+    "mise --cd packages/api run test",
+    "mise --cd packages/web run test",
+    "mise --cd packages/worker run test",
+]
+
+[tasks.build-all]
+description = "Build all packages in order"
+run = [
+    "mise --cd packages/shared run build",
+    "mise --cd packages/api run build",
+    "mise --cd packages/web run build",
+]
+```
+
+### Package-Specific Overrides
+
+```toml
+# packages/api/mise.toml
+[tools]
+# Additional tools for API package
+python = "3.11"  # API needs Python
+"pipx:black" = "latest"
+
+[tasks.build]
+description = "Build API"
+depends = ["//shared:build"]  # Depends on shared package
+run = "npm run build"
+
+[tasks.test]
+description = "Test API"
+depends = ["build"]
+run = "pytest tests/"
+```
+
+### Shared Configuration Includes
+
+Create reusable tool sets:
+
+**mise-shared-tools.toml:**
+
+```toml
+[tools]
+"npm:prettier" = "3.0.0"
+"npm:eslint" = "8.50.0"
+"npm:typescript" = "5.2.0"
+```
+
+**Root mise.toml:**
+
+```toml
+[config]
+includes = ["mise-shared-tools.toml"]
+
+[tools]
+node = "20"
+```
+
+**Package mise.toml:**
+
+```toml
+[config]
+includes = ["../../mise-shared-tools.toml"]
+
+[tools]
+# Package-specific tools
+"npm:jest" = "29.0.0"
+```
+
+## Tool Backend Edge Cases
+
+### asdf Plugin Compatibility
+
+Use asdf plugins when core backend unavailable:
+
+```toml
+[tools]
+# asdf plugin (legacy compatibility)
+"asdf:hashicorp/terraform" = "1.5.0"
+
+# Configure plugin
+[tools.options]
+asdf_terraform_version = "1.5.0"
+asdf_terraform_plugin_url = "https://github.com/asdf-community/asdf-hashicorp"
+```
+
+### vfox Plugin Integration
+
+Use vfox plugins for additional tools:
+
+```toml
+[tools]
+# vfox plugin
+"vfox:version-fox/vfox-nodejs" = "20.11.0"
+
+[settings]
+experimental = true  # Required for vfox
+```
+
+### Custom Backend Scripts
+
+Create custom tool backends:
+
+**mise-tasks/install-custom-tool:**
+
+```bash
+#!/usr/bin/env bash
+#MISE description="Install custom tool"
+
+set -euo pipefail
+
+VERSION="${1:-latest}"
+INSTALL_DIR="$MISE_INSTALLS_DIR/custom-tool/$VERSION"
+
+mkdir -p "$INSTALL_DIR/bin"
+
+# Custom installation logic
+curl -fsSL "https://example.com/custom-tool-$VERSION.tar.gz" | \
+    tar -xz -C "$INSTALL_DIR"
+
+# Make executable
+chmod +x "$INSTALL_DIR/bin/custom-tool"
+
+echo "Custom tool $VERSION installed to $INSTALL_DIR"
+```
+
+### Backend Priority and Fallbacks
+
+```toml
+[tools]
+# Try core backend first, fall back to asdf plugin
+node = "20"  # Uses core:node backend
+
+# If tool not in core, mise tries:
+# 1. asdf plugin (if ~/.asdf/plugins/[tool] exists)
+# 2. vfox plugin (if configured)
+# 3. aqua registry
+# 4. ubi (GitHub releases)
+
+[settings]
+# Control backend priority
+backend_order = ["core", "asdf", "vfox", "aqua", "ubi"]
+```
+
+## Troubleshooting Tool Installation
+
+### Debug Tool Installation
+
+```bash
+# Enable debug output
+MISE_DEBUG=1 mise install node@20
+
+# Show which backend is used
+mise ls --json | jq '.[] | {tool, backend: .install_path | split("/") | .[7]}'
+
+# Check tool path resolution
+mise which node
+mise which --path node
+
+# Verify tool is in PATH
+mise exec -- which node
+```
+
+### Installation Failures
+
+**Tool not found:**
+
+```bash
+# Check if backend is available
+mise backends
+
+# Try explicit backend
+mise use core:node@20
+# or
+mise use asdf:nodejs@20
+
+# Search aqua registry
+curl -s https://aquaproj.github.io/registry.json | jq '.packages[] | select(.name | contains("node"))'
+```
+
+**Version not available:**
+
+```bash
+# List available versions
+mise ls-remote node
+
+# Check backend-specific versions
+mise ls-remote core:node
+mise ls-remote asdf:nodejs
+
+# Use version prefix to find available
+mise ls-remote node | grep "^20\."
+```
+
+**Build failures:**
+
+```bash
+# Check build dependencies
+mise doctor
+
+# Install with verbose output
+MISE_DEBUG=1 MISE_TRACE=1 mise install go:github.com/user/tool/cmd/tool
+
+# Try with specific go version
+mise use go@1.21
+mise install go:github.com/user/tool/cmd/tool
+```
+
+### Tool Conflicts
+
+Multiple tools providing same binary:
+
+```bash
+# Show which tool provides binary
+mise which rg
+
+# List all installed tools
+mise ls --installed
+
+# Remove conflicting tool
+mise uninstall cargo:ripgrep
+# or
+mise use ubi:BurntSushi/ripgrep  # Switch backend
+```
+
+### Cache Issues
+
+```bash
+# Clear tool cache
+rm -rf ~/.cache/mise/
+
+# Clear specific tool cache
+rm -rf ~/.cache/mise/[tool-name]/
+
+# Reinstall without cache
+mise install --force node@20
+```
+
+## Performance Optimization
+
+### Parallel Tool Installation
+
+```bash
+# Install multiple tools in parallel
+mise install --jobs 8
+
+# Install specific tools in parallel
+mise install node@20 python@3.11 go@latest --jobs 3
+```
+
+### Minimal Tool Sets
+
+```toml
+[tools]
+# Core tools only
+node = "20"
+python = "3.11"
+
+[env.development.tools]
+# Additional development tools
+"npm:nodemon" = "latest"
+"pipx:ipython" = "latest"
+
+[env.ci.tools]
+# CI-specific tools
+"npm:@sentry/cli" = "latest"
+```
+
+Use:
+
+```bash
+# Development
+mise install
+
+# CI (minimal set)
+MISE_ENV=ci mise install
+```
+
+### Tool Installation Scripts
+
+Batch install tools:
+
+```bash
+#!/usr/bin/env bash
+# install-tools.sh
+
+set -euo pipefail
+
+echo "Installing core tools..."
+mise install node@20 python@3.11 go@latest --jobs 4
+
+echo "Installing CLI tools..."
+mise install \
+    npm:prettier \
+    npm:eslint \
+    cargo:ripgrep \
+    cargo:fd-find \
+    --jobs 4
+
+echo "Installing project tools..."
+mise install  # Install remaining from mise.toml
+
+echo "✅ All tools installed!"
+```
+
+## Advanced Patterns
+
+### Environment-Specific Tools
+
+```toml
+[tools]
+# Default tools
+node = "20"
+
+[env.testing.tools]
+# Testing environment needs older node
+node = "18"
+"npm:jest" = "27.0.0"
+
+[env.production.tools]
+# Production uses latest stable
+node = "20.11.0"  # Pinned version
+```
+
+### Feature Flag Tools
+
+```toml
+[tools]
+# Always installed
+node = "20"
+
+# Conditional installation
+"npm:storybook" = { version = "latest", if = "{{ env.ENABLE_STORYBOOK == '1' }}" }
+"npm:cypress" = { version = "latest", if = "{{ env.E2E_TESTS == '1' }}" }
+```
+
+Usage:
+
+```bash
+# Without feature flags
+mise install
+
+# With feature flags
+ENABLE_STORYBOOK=1 E2E_TESTS=1 mise install
+```
+
+### Tool Aliasing
+
+```toml
+[tools]
+# Multiple versions of same tool
+"node:20" = "20.11.0"
+"node:18" = "18.18.0"
+
+[tasks.test-compat]
+description = "Test compatibility across Node versions"
+run = [
+    "mise exec node:20 -- npm test",
+    "mise exec node:18 -- npm test",
+]
+```
+
+### Dynamic Tool Versions
+
+```toml
+[vars]
+node_version = "{{exec(command='cat .nvmrc')}}"
+python_version = "{{exec(command='cat .python-version')}}"
+
+[tools]
+node = "{{vars.node_version}}"
+python = "{{vars.python_version}}"
+```
+
+Reads versions from external files.
+
+### Tool Version Matrices
+
+Test against multiple versions:
+
+```toml
+[tasks.test-matrix]
+description = "Test against multiple Node versions"
+run = """
+for version in 18 20 21; do
+  echo "Testing with Node $version..."
+  mise use node@$version
+  mise install
+  npm test
+done
+"""
+```
+
+### Offline Tool Installation
+
+Pre-download tools for offline use:
+
+```bash
+# Download tools to cache
+mise install node@20
+mise install python@3.11
+
+# Cache location
+ls -la ~/.cache/mise/
+
+# In offline environment, tools install from cache
+mise install  # Uses cached downloads
+```
+
+### Container-Optimized Tool Management
+
+```dockerfile
+# Dockerfile
+FROM debian:bullseye-slim
+
+# Install mise
+RUN curl https://mise.run | sh
+
+# Copy mise config
+COPY mise.toml /app/
+
+# Install tools (cached layer)
+RUN cd /app && mise install
+
+# Only system tools in container
+COPY mise.toml /app/
+RUN cd /app && \
+    mise use --pin node@20 python@3.11 && \
+    mise install && \
+    rm -rf ~/.cache/mise/
+```
+
+### Tool Verification
+
+Add checksums for security:
+
+```toml
+[tools]
+node = { version = "20.11.0", checksum = "sha256:..." }
+
+[settings]
+verify_checksums = true  # Fail if checksum doesn't match
+```
+
+## Migration Patterns
+
+### From asdf to mise
+
+```bash
+# Read from .tool-versions
+cat .tool-versions
+# nodejs 20.11.0
+# python 3.11.5
+
+# Generate mise.toml
+mise use node@20.11.0 python@3.11.5
+
+# Migrate plugins
+for plugin in $(asdf plugin list); do
+    version=$(asdf current $plugin | awk '{print $2}')
+    mise use $plugin@$version
+done
+```
+
+### From nvm/rbenv/pyenv to mise
+
+```bash
+# Read from version files
+NODE_VERSION=$(cat .nvmrc)
+PYTHON_VERSION=$(cat .python-version)
+RUBY_VERSION=$(cat .ruby-version)
+
+# Generate mise config
+mise use node@$NODE_VERSION
+mise use python@$PYTHON_VERSION
+mise use ruby@$RUBY_VERSION
+```
+
+### Gradual Migration
+
+```toml
+[tools]
+# Keep existing version managers for some tools
+node = "system"  # Still using nvm
+python = "3.11"  # Migrated to mise
+ruby = "system"  # Still using rbenv
+
+# Gradually migrate each tool
+```
+
+## Migrating from Tera Templates to Usage
+
+### Background
+
+**Tera templates** (deprecated, removal in mise 2026.11.0) were the old way to define task arguments using template functions like `{{arg()}}`, `{{option()}}`, and `{{flag()}}` directly in the `run` script.
+
+**Problems with Tera:**
+- Two-pass parsing issues (templates return empty strings during spec collection)
+- Inconsistent shell escaping across different shells
+- No automatic `--help` generation
+- Poor separation of argument definition from script logic
+
+**Usage field** (recommended) uses clean KDL syntax in a dedicated field, with arguments available as `$usage_*` environment variables.
+
+### Migration Examples
+
+#### Example 1: Simple Argument with Default
+
+**Old (Tera):**
+```toml
+[tasks.test]
+description = "Run tests"
+run = 'npm test -- {{arg(name="filter", default=".*")}}'
+```
+
+**New (Usage):**
+```toml
+[tasks.test]
+description = "Run tests"
+usage = '''
+arg "<filter>" help="Test filter pattern" default=".*"
+'''
+run = 'npm test -- "${usage_filter?}"'
+```
+
+#### Example 2: Multiple Arguments and Flags
+
+**Old (Tera):**
+```toml
+[tasks.deploy]
+description = "Deploy application"
+run = '''
+./deploy.sh \
+  {{arg(name="environment")}} \
+  {{option(name="region", default="us-east-1")}} \
+  {{flag(name="dry-run")}}
+'''
+```
+
+**New (Usage):**
+```toml
+[tasks.deploy]
+description = "Deploy application"
+usage = '''
+arg "<environment>" help="Target environment"
+flag "--region <region>" help="AWS region" default="us-east-1"
+flag "--dry-run" help="Preview changes only"
+'''
+run = '''
+./deploy.sh "${usage_environment?}" \
+  --region "${usage_region?}" \
+  ${usage_dry_run:+--dry-run}
+'''
+```
+
+#### Example 3: Choices/Validation
+
+**Old (Tera):**
+```toml
+[tasks.build]
+description = "Build application"
+run = 'cargo build --profile {{arg(name="profile", default="dev")}}'
+```
+
+**New (Usage):**
+```toml
+[tasks.build]
+description = "Build application"
+usage = '''
+arg "<profile>" help="Build profile" default="dev" {
+  choices "dev" "release" "debug"
+}
+'''
+run = 'cargo build --profile "${usage_profile?}"'
+```
+
+#### Example 4: Variadic Arguments
+
+**Old (Tera):**
+```toml
+[tasks.lint]
+description = "Lint files"
+run = 'eslint {{arg(name="files", var=true)}}'
+```
+
+**New (Usage):**
+```toml
+[tasks.lint]
+description = "Lint files"
+usage = '''
+arg "<files>" help="Files to lint" var=#true
+'''
+run = 'eslint ${usage_files?}'
+```
+
+#### Example 5: File Task Migration
+
+**Old (Tera in file task):**
+```bash
+#!/usr/bin/env bash
+#MISE description="Process files"
+set -euo pipefail
+INPUT="{{arg(name='input')}}"
+OUTPUT="{{option(name='output', default='out.txt')}}"
+VERBOSE="{{flag(name='verbose')}}"
+```
+
+**New (Usage in file task):**
+```bash
+#!/usr/bin/env bash
+#MISE description="Process files"
+#USAGE arg "<input>" help="Input file"
+#USAGE flag "--output <output>" help="Output file" default="out.txt"
+#USAGE flag "-v --verbose" help="Verbose output"
+set -euo pipefail
+INPUT="${usage_input?}"
+OUTPUT="${usage_output?}"
+VERBOSE="${usage_verbose:-false}"
+```
+
+### Migration Checklist
+
+1. **Move argument definitions** from `run` to `usage` field
+2. **Convert syntax:**
+   - `{{arg(name="x")}}` → `arg "<x>"` in usage, `${usage_x?}` in run
+   - `{{option(name="x", default="y")}}` → `flag "--x <x>" default="y"` + `${usage_x?}`
+   - `{{flag(name="x")}}` → `flag "--x"` + `${usage_x:+--x}` or `${usage_x:-false}`
+3. **Add help text** - Now required and generates `--help` automatically
+4. **Use bash expansions:**
+   - `${var?}` for required arguments (error if unset)
+   - `${var:-default}` for optional with defaults
+   - `${var:+--flag}` for boolean flags (only include if true)
+5. **Add choices** if argument has limited valid values
+6. **Test execution** - Verify arguments work as expected
+7. **Check help output** - Run `mise run taskname --help`
+
+### Why Migrate Now
+
+- **Removal scheduled** - Tera template support ends in mise 2026.11.0
+- **Better UX** - Automatic help generation and validation
+- **Clearer code** - Separation of argument definition from logic
+- **More reliable** - No two-pass parsing issues or escaping problems
+
+### Quick Find & Replace Patterns
+
+Search for tasks using Tera templates:
+```bash
+# Find tasks with Tera templates
+grep -r "{{arg\|{{option\|{{flag" mise.toml mise-tasks/
+```
+
+Convert common patterns:
+- `{{arg(name="x")}}` → Add `arg "<x>"` to usage, use `${usage_x?}` in run
+- `{{flag(name="x")}}` → Add `flag "--x"` to usage, use `${usage_x:+--x}` in run
+- `default=` in Tera → `default=` in usage field
+- No equivalent for help text in Tera → Add `help=` in usage field
