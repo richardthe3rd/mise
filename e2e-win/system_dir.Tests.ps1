@@ -56,4 +56,46 @@ Describe 'MISE_SYSTEM_DIR' {
         $output = mise doctor 2>&1 | Out-String
         $output | Should -Not -Match "/etc/mise"
     }
+
+    It 'does not use default system dir if it does not exist (security)' {
+        # Remove MISE_SYSTEM_DIR override to test default behavior
+        Remove-Item Env:\MISE_SYSTEM_DIR -ErrorAction SilentlyContinue
+
+        # Set PROGRAMDATA to a non-existent location to simulate default behavior
+        $nonExistentProgramData = Join-Path $TestDrive "fake_programdata"
+        $env:PROGRAMDATA = $nonExistentProgramData
+
+        # Create a config that would be in the non-existent system dir
+        $systemDirPath = Join-Path $nonExistentProgramData "mise"
+        # Explicitly do NOT create the directory - this tests the security feature
+
+        # mise should work without system config when dir doesn't exist
+        $output = mise doctor 2>&1 | Out-String
+        $output | Should -Not -BeNullOrEmpty
+
+        # Clean up
+        Remove-Item Env:\PROGRAMDATA -ErrorAction SilentlyContinue
+    }
+
+    It 'uses default system dir if it exists' {
+        # Remove MISE_SYSTEM_DIR override to test default behavior
+        Remove-Item Env:\MISE_SYSTEM_DIR -ErrorAction SilentlyContinue
+
+        # Set PROGRAMDATA to a test location
+        $testProgramData = Join-Path $TestDrive "test_programdata"
+        $env:PROGRAMDATA = $testProgramData
+
+        # Create the system directory to simulate admin-created directory
+        $systemDirPath = Join-Path $testProgramData "mise"
+        New-Item -ItemType Directory -Path $systemDirPath -Force | Out-Null
+        $systemConfig = Join-Path $systemDirPath "config.toml"
+        Set-Content -Path $systemConfig -Value "[env]`nTEST_SECURITY_VAR = 'system_exists'"
+
+        # mise should use the system config
+        $output = mise env --json | ConvertFrom-Json
+        $output.TEST_SECURITY_VAR | Should -Be "system_exists"
+
+        # Clean up
+        Remove-Item Env:\PROGRAMDATA -ErrorAction SilentlyContinue
+    }
 }

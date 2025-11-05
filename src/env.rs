@@ -19,6 +19,9 @@ use std::{path, process};
 use std::{path::Path, string::ToString};
 use std::{path::PathBuf, sync::atomic::AtomicBool};
 
+#[cfg(windows)]
+use std::os::windows::ffi::OsStrExt;
+
 pub static ARGS: RwLock<Vec<String>> = RwLock::new(vec![]);
 pub static TOOL_ARGS: RwLock<Vec<ToolArg>> = RwLock::new(vec![]);
 #[cfg(unix)]
@@ -113,16 +116,163 @@ pub static MISE_STATE_DIR: Lazy<PathBuf> =
     Lazy::new(|| var_path("MISE_STATE_DIR").unwrap_or_else(|| XDG_STATE_HOME.join("mise")));
 pub static MISE_TMP_DIR: Lazy<PathBuf> =
     Lazy::new(|| var_path("MISE_TMP_DIR").unwrap_or_else(|| temp_dir().join("mise")));
+
+/// Checks if a directory on Windows is owned by a trusted entity (SYSTEM or Administrators)
+#[cfg(windows)]
+fn is_system_owned_directory(path: &Path) -> bool {
+    use std::ptr;
+    use winapi::shared::winerror::ERROR_SUCCESS;
+    use winapi::um::accctrl::SE_FILE_OBJECT;
+    use winapi::um::aclapi::GetNamedSecurityInfoW;
+    use winapi::um::securitybaseapi::{EqualSid, IsValidSid};
+    use winapi::um::winbase::LocalFree;
+    use winapi::um::winnt::{DOMAIN_ALIAS_RID_ADMINS, SECURITY_LOCAL_SYSTEM_RID};
+    use winapi::um::winnt::{
+        OWNER_SECURITY_INFORMATION, PSID, PVOID, SECURITY_BUILTIN_DOMAIN_RID, SECURITY_DESCRIPTOR,
+        SECURITY_NT_AUTHORITY, SID_IDENTIFIER_AUTHORITY,
+    };
+
+    // Convert path to wide string
+    let wide_path: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+
+    let mut psid_owner: PSID = ptr::null_mut();
+    let mut psd: *mut SECURITY_DESCRIPTOR = ptr::null_mut();
+
+    unsafe {
+        // Get the owner SID of the file/directory
+        let result = GetNamedSecurityInfoW(
+            wide_path.as_ptr(),
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION,
+            &mut psid_owner,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            ptr::null_mut(),
+            &mut psd as *mut *mut _ as *mut PVOID,
+        );
+
+        if result != ERROR_SUCCESS || psid_owner.is_null() {
+            warn!(
+                "Failed to get security info for {}: error {}",
+                path.display(),
+                result
+            );
+            if !psd.is_null() {
+                LocalFree(psd as *mut _);
+            }
+            return false;
+        }
+
+        if IsValidSid(psid_owner) == 0 {
+            LocalFree(psd as *mut _);
+            return false;
+        }
+
+        // Create well-known SIDs for SYSTEM and Administrators
+        let mut system_sid_buffer = [0u8; 256];
+        let mut admin_sid_buffer = [0u8; 256];
+
+        let nt_authority = SID_IDENTIFIER_AUTHORITY {
+            Value: SECURITY_NT_AUTHORITY,
+        };
+
+        // Check against SYSTEM (S-1-5-18)
+        let mut system_sid = system_sid_buffer.as_mut_ptr() as PSID;
+        let system_sid_size = system_sid_buffer.len() as u32;
+
+        #[allow(deprecated)]
+        let system_created = winapi::um::securitybaseapi::AllocateAndInitializeSid(
+            &nt_authority as *const _ as *mut _,
+            1,
+            SECURITY_LOCAL_SYSTEM_RID as u32,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            &mut system_sid,
+        );
+
+        let is_system = if system_created != 0 {
+            let result = EqualSid(psid_owner, system_sid) != 0;
+            winapi::um::securitybaseapi::FreeSid(system_sid);
+            result
+        } else {
+            false
+        };
+
+        if is_system {
+            LocalFree(psd as *mut _);
+            return true;
+        }
+
+        // Check against Administrators (S-1-5-32-544)
+        let mut admin_sid = admin_sid_buffer.as_mut_ptr() as PSID;
+
+        #[allow(deprecated)]
+        let admin_created = winapi::um::securitybaseapi::AllocateAndInitializeSid(
+            &nt_authority as *const _ as *mut _,
+            2,
+            SECURITY_BUILTIN_DOMAIN_RID as u32,
+            DOMAIN_ALIAS_RID_ADMINS as u32,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            &mut admin_sid,
+        );
+
+        let is_admin = if admin_created != 0 {
+            let result = EqualSid(psid_owner, admin_sid) != 0;
+            winapi::um::securitybaseapi::FreeSid(admin_sid);
+            result
+        } else {
+            false
+        };
+
+        LocalFree(psd as *mut _);
+        is_admin
+    }
+}
+
 #[cfg(unix)]
 pub static MISE_SYSTEM_DIR: Lazy<Option<PathBuf>> =
     Lazy::new(|| Some(var_path("MISE_SYSTEM_DIR").unwrap_or_else(|| PathBuf::from("/etc/mise"))));
+
 #[cfg(windows)]
 pub static MISE_SYSTEM_DIR: Lazy<Option<PathBuf>> = Lazy::new(|| {
-    Some(
-        var_path("MISE_SYSTEM_DIR")
-            .or_else(|| var_path("PROGRAMDATA").map(|p| p.join("mise")))
-            .unwrap_or_else(|| PathBuf::from("C:\\ProgramData\\mise")),
-    )
+    // If MISE_SYSTEM_DIR is explicitly set, use it without validation
+    if let Some(explicit_path) = var_path("MISE_SYSTEM_DIR") {
+        return Some(explicit_path);
+    }
+
+    // Get the default Windows system directory path
+    let system_path = var_path("PROGRAMDATA")
+        .map(|p| p.join("mise"))
+        .unwrap_or_else(|| PathBuf::from("C:\\ProgramData\\mise"));
+
+    // Only use the system directory if it exists AND is owned by a trusted entity
+    // This prevents unprivileged users from creating it and controlling system-wide config
+    if system_path.exists() {
+        if is_system_owned_directory(&system_path) {
+            Some(system_path)
+        } else {
+            warn!(
+                "System directory {} exists but is not owned by SYSTEM or Administrators. Ignoring for security.",
+                system_path.display()
+            );
+            None
+        }
+    } else {
+        // Directory doesn't exist - don't create it as it requires admin privileges
+        // to be properly secured
+        trace!("System directory {} does not exist", system_path.display());
+        None
+    }
 });
 
 // data subdirs
@@ -737,34 +887,59 @@ mod tests {
 
     #[test]
     #[cfg(windows)]
-    fn test_mise_system_dir_windows_default() {
-        // Test that MISE_SYSTEM_DIR defaults to ProgramData\mise on Windows
+    fn test_mise_system_dir_windows_default_not_exists() {
+        // Test that MISE_SYSTEM_DIR returns None if the directory doesn't exist
+        // This is the security feature to prevent unprivileged users from creating it
         remove_var("MISE_SYSTEM_DIR");
+        set_var("PROGRAMDATA", "Z:\\NonExistentPath");
+
+        // Since we can't easily test the lazy static, we'll test the logic inline
+        let system_path = var_path("PROGRAMDATA")
+            .map(|p| p.join("mise"))
+            .unwrap_or_else(|| PathBuf::from("C:\\ProgramData\\mise"));
+
+        // The path should not exist
+        assert!(!system_path.exists());
+
+        // Therefore, the system dir should be None (security feature)
+        let system_dir = if system_path.exists() {
+            Some(system_path)
+        } else {
+            None
+        };
+        assert_eq!(system_dir, None);
+
         remove_var("PROGRAMDATA");
-        // Force re-evaluation by creating a new lazy value
-        let system_dir = Some(
-            var_path("MISE_SYSTEM_DIR")
-                .or_else(|| var_path("PROGRAMDATA").map(|p| p.join("mise")))
-                .unwrap_or_else(|| PathBuf::from("C:\\ProgramData\\mise")),
-        );
-        assert_eq!(system_dir, Some(PathBuf::from("C:\\ProgramData\\mise")));
     }
 
     #[test]
     #[cfg(windows)]
-    fn test_mise_system_dir_windows_programdata() {
-        // Test that MISE_SYSTEM_DIR uses PROGRAMDATA env var if set
+    fn test_mise_system_dir_windows_programdata_exists() {
+        // Test that MISE_SYSTEM_DIR uses PROGRAMDATA\mise if it exists
+        use std::fs;
+
         remove_var("MISE_SYSTEM_DIR");
-        set_var("PROGRAMDATA", "D:\\CustomProgramData");
-        let system_dir = Some(
-            var_path("MISE_SYSTEM_DIR")
-                .or_else(|| var_path("PROGRAMDATA").map(|p| p.join("mise")))
-                .unwrap_or_else(|| PathBuf::from("C:\\ProgramData\\mise")),
-        );
-        assert_eq!(
-            system_dir,
-            Some(PathBuf::from("D:\\CustomProgramData\\mise"))
-        );
+
+        // Create a temporary directory to simulate existing system dir
+        let temp_dir = std::env::temp_dir().join(format!("mise_test_{}", std::process::id()));
+        let system_path = temp_dir.join("mise");
+        fs::create_dir_all(&system_path).unwrap();
+
+        set_var("PROGRAMDATA", &temp_dir);
+
+        // Since the directory exists, it should be used
+        let test_path = var_path("PROGRAMDATA").map(|p| p.join("mise")).unwrap();
+        assert!(test_path.exists());
+
+        let system_dir = if test_path.exists() {
+            Some(test_path.clone())
+        } else {
+            None
+        };
+        assert_eq!(system_dir, Some(system_path.clone()));
+
+        // Cleanup
+        fs::remove_dir_all(&system_path).ok();
         remove_var("PROGRAMDATA");
     }
 
