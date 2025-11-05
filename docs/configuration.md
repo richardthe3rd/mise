@@ -441,7 +441,7 @@ This is used for temporary storage such as when installing tools.
 
 ### `MISE_SYSTEM_DIR`
 
-Default: `/etc/mise`
+Default: `/etc/mise` (Unix), `C:\ProgramData\mise` (Windows)
 
 This is the directory where mise stores system-wide configuration.
 
