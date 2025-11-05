@@ -186,7 +186,15 @@ self_update = { version = "0.42", optional = true, default-features = false, fea
   "rustls",
 ] }
 sevenz-rust = "0.6"
-winapi = { version = "0.3.9", features = ["consoleapi", "minwindef"] }
+winapi = { version = "0.3.9", features = [
+  "consoleapi",
+  "minwindef",
+  "securitybaseapi",
+  "winnt",
+  "accctrl",
+  "aclapi",
+  "winerror",
+] }
 
 [build-dependencies]
 built = { version = "0.8", features = ["chrono"] }

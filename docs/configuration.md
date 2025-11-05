@@ -47,7 +47,8 @@ When mise needs configuration, it follows this process:
 
 ```
 /
-├── etc/mise/                          # System-wide config (highest precedence)
+├── etc/mise/                          # System-wide config on Unix (highest precedence)
+│   │                                  # On Windows: C:\ProgramData\mise
 │   ├── conf.d/*.toml                 # System fragments, loaded alphabetically
 │   ├── config.toml                   # System defaults
 │   └── config.<env>.toml             # Env-specific system config (MISE_ENV or -E)
@@ -311,10 +312,21 @@ status = { missing_tools = "if_other_versions_installed", show_env = false, show
 foo = "bar"
 ```
 
-## System config: `/etc/mise/config.toml`
+## System config: `/etc/mise/config.toml` (Unix) or `C:\ProgramData\mise\config.toml` (Windows)
 
 Similar to `~/.config/mise/config.toml` but for all users on the system. This is useful for
 setting defaults for all users.
+
+The system config directory is:
+
+- **Unix/Linux/macOS**: `/etc/mise/`
+- **Windows**: `C:\ProgramData\mise\` (or `%PROGRAMDATA%\mise`)
+
+**Security Note (Windows):** The system directory is only used if it already exists AND is owned by
+a trusted entity (SYSTEM account or Administrators group). This prevents unprivileged users from
+creating the directory and controlling system-wide configuration. An administrator must create the
+directory with appropriate permissions first. If the directory doesn't exist or has incorrect
+ownership, mise will skip system configuration loading.
 
 ## `.tool-versions`
 
@@ -441,9 +453,18 @@ This is used for temporary storage such as when installing tools.
 
 ### `MISE_SYSTEM_DIR`
 
-Default: `/etc/mise` (Unix), `C:\ProgramData\mise` (Windows)
+Default:
+
+- **Unix/Linux/macOS**: `/etc/mise`
+- **Windows**: `%PROGRAMDATA%\mise` (typically `C:\ProgramData\mise`), only if it exists
 
 This is the directory where mise stores system-wide configuration.
+
+**Windows Security:** On Windows, the system directory is only used if it already exists AND is
+owned by the SYSTEM account or Administrators group. Mise will not create this directory
+automatically and will verify ownership to prevent unprivileged users from controlling system-wide
+configuration. An administrator should create and secure this directory if system-wide configuration
+is needed.
 
 ### `MISE_GLOBAL_CONFIG_FILE`
 
