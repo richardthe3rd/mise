@@ -1724,6 +1724,33 @@ docs = """
 env = "MISE_WINDOWS_SHIM_MODE"
 type = "String"
 
+[windows_system_dir_admin_check]
+default = true
+description = "On Windows, verify that MISE_SYSTEM_DIR is owned by an admin account before trusting it. This must be an env var."
+docs = """
+On Windows, the default system directory is `%PROGRAMDATA%\\mise` (typically `C:\\ProgramData\\mise`).
+Unlike Unix's `/etc` which is protected by filesystem permissions, on Windows any user can create
+directories in ProgramData. This creates a security risk where a non-admin user could create
+`%PROGRAMDATA%\\mise` and "poison" the system configuration for all users.
+
+When this setting is enabled (default), mise will verify that the system directory is owned by
+a trusted admin account (SYSTEM, Administrators, or TrustedInstaller) before loading configuration
+from it. If the directory exists but is not admin-owned, mise will warn and skip loading system
+configuration.
+
+Set to `false` to disable this check, which may be necessary if:
+- You have a custom MISE_SYSTEM_DIR that is intentionally user-owned
+- You're in a controlled environment where this check is not needed
+- You're using an older MISE_SYSTEM_DIR setup
+
+This setting has no effect on Unix systems where `/etc` is already protected by the OS.
+
+**Important**: This setting can only be configured via environment variable, not in config files.
+This is because the check happens before config files are loaded.
+"""
+env = "MISE_WINDOWS_SYSTEM_DIR_ADMIN_CHECK"
+type = "Bool"
+
 [yes]
 description = "This will automatically answer yes or no to prompts. This is useful for scripting."
 env = "MISE_YES"

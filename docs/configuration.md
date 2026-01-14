@@ -487,9 +487,15 @@ This is used for temporary storage such as when installing tools.
 
 ### `MISE_SYSTEM_DIR`
 
-Default: `/etc/mise`
+Default: `/etc/mise` on Unix, `%PROGRAMDATA%\mise` on Windows (typically `C:\ProgramData\mise`)
 
 This is the directory where mise stores system-wide configuration.
+
+On Windows, mise verifies that this directory is owned by an administrator account (SYSTEM, Administrators,
+or TrustedInstaller) before loading configuration from it. This prevents non-admin users from "poisoning"
+the system configuration for other users. If the directory exists but is not admin-owned, mise will skip
+loading system configuration and display a warning. See `windows_system_dir_admin_check` setting to
+disable this verification if needed.
 
 ### `MISE_GLOBAL_CONFIG_FILE`
 

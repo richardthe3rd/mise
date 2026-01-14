@@ -13,7 +13,6 @@ use eyre::Result;
 
 use crate::config::settings::MisercSettings;
 use crate::dirs;
-use crate::env;
 use crate::file;
 
 static MISERC: OnceLock<MisercSettings> = OnceLock::new();
@@ -131,15 +130,65 @@ fn find_miserc_files() -> Vec<PathBuf> {
     }
 
     // System: /etc/mise/miserc.toml (or MISE_SYSTEM_DIR)
-    let system_dir = env::var("MISE_SYSTEM_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("/etc/mise"));
-    let system_path = system_dir.join("miserc.toml");
-    if system_path.is_file() {
-        files.push(system_path);
+    // On Windows, verify admin ownership before trusting system directory
+    let system_dir = get_verified_system_dir();
+    if let Some(dir) = system_dir {
+        let system_path = dir.join("miserc.toml");
+        if system_path.is_file() {
+            files.push(system_path);
+        }
     }
 
     files
+}
+
+/// Get the system directory, with admin ownership verification on Windows.
+/// Returns None if the directory should not be trusted.
+fn get_verified_system_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    let system_dir = std::env::var("MISE_SYSTEM_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            std::env::var("PROGRAMDATA")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| PathBuf::from("C:\\ProgramData"))
+                .join("mise")
+        });
+
+    #[cfg(not(windows))]
+    let system_dir = std::env::var("MISE_SYSTEM_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("/etc/mise"));
+
+    // On Windows, verify the system directory is admin-owned before trusting it
+    #[cfg(windows)]
+    {
+        // Check if admin verification is disabled via env var
+        let admin_check_enabled = std::env::var("MISE_WINDOWS_SYSTEM_DIR_ADMIN_CHECK")
+            .map(|v| !v.eq_ignore_ascii_case("false") && !v.eq_ignore_ascii_case("0"))
+            .unwrap_or(true);
+
+        if admin_check_enabled && system_dir.exists() {
+            match crate::windows_admin::verify_system_dir_ownership(&system_dir) {
+                Ok(true) => Some(system_dir),
+                Ok(false) => {
+                    // Not admin-owned - skip system directory
+                    None
+                }
+                Err(_) => {
+                    // Failed to check - be cautious, skip system directory
+                    None
+                }
+            }
+        } else {
+            Some(system_dir)
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        Some(system_dir)
+    }
 }
 
 #[cfg(test)]

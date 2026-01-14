@@ -33,6 +33,8 @@ use crate::toolset::{
 };
 use crate::ui::style;
 use crate::{backend, dirs, env, file, lockfile, registry, runtime_symlinks, shims, timeout};
+#[cfg(windows)]
+use crate::windows_admin;
 
 pub mod config_file;
 pub mod env_directive;
@@ -1119,8 +1121,49 @@ pub fn system_config_files() -> IndexSet<PathBuf> {
         return s.clone();
     }
     if let Some(p) = &*env::MISE_SYSTEM_CONFIG_FILE {
+        // User explicitly set a system config file, skip directory ownership check
         return vec![p.clone()].into_iter().collect();
     }
+
+    // On Windows, verify the system directory is owned by an admin before trusting it
+    // This prevents non-admin users from poisoning system config for all users
+    // Note: We read the env var directly to avoid circular dependency with Settings
+    #[cfg(windows)]
+    {
+        let admin_check_enabled = std::env::var("MISE_WINDOWS_SYSTEM_DIR_ADMIN_CHECK")
+            .map(|v| !v.eq_ignore_ascii_case("false") && !v.eq_ignore_ascii_case("0"))
+            .unwrap_or(true); // Default to true
+
+        if admin_check_enabled {
+            match windows_admin::verify_system_dir_ownership(&dirs::SYSTEM) {
+                Ok(true) => {
+                    // Admin owned or doesn't exist - safe to use
+                }
+                Ok(false) => {
+                    // Directory exists but is NOT admin-owned - security risk
+                    warn!(
+                        "System directory {} exists but is not owned by an admin account. \
+                        Skipping system config to prevent potential security issues. \
+                        To use this directory anyway, set MISE_WINDOWS_SYSTEM_DIR_ADMIN_CHECK=false \
+                        or use MISE_SYSTEM_DIR to specify a different directory.",
+                        dirs::SYSTEM.display()
+                    );
+                    let empty = IndexSet::new();
+                    *s = Some(empty.clone());
+                    return empty;
+                }
+                Err(e) => {
+                    // Failed to check ownership - log warning but continue
+                    debug!(
+                        "Failed to verify ownership of system directory {}: {}",
+                        dirs::SYSTEM.display(),
+                        e
+                    );
+                }
+            }
+        }
+    }
+
     let config_files = config_files_from_dir(&dirs::SYSTEM);
     *s = Some(config_files.clone());
     config_files
