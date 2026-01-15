@@ -573,7 +573,13 @@ pub fn parse_url_replacements(input: &str) -> Result<IndexMap<String, String>, s
 }
 
 /// Parse path list using platform-specific separator (`:` on Unix, `;` on Windows)
-/// This uses std::env::split_paths which handles platform conventions
+/// This uses std::env::split_paths which handles platform conventions.
+///
+/// Note: This converts paths to strings using to_string_lossy(), which may replace
+/// invalid UTF-8 sequences with replacement characters. This is acceptable since:
+/// 1. Environment variables are already strings
+/// 2. Most systems use UTF-8 paths
+/// 3. The alternative would be to not support the FromStr trait required by confique
 pub fn list_by_path_sep<T, C>(input: &str) -> Result<C, <T as FromStr>::Err>
 where
     T: FromStr,
