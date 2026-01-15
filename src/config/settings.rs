@@ -572,6 +572,19 @@ pub fn parse_url_replacements(input: &str) -> Result<IndexMap<String, String>, s
     serde_json::from_str(input)
 }
 
+/// Parse path list using platform-specific separator (`:` on Unix, `;` on Windows)
+/// This uses std::env::split_paths which handles platform conventions
+pub fn list_by_path_sep<T, C>(input: &str) -> Result<C, <T as FromStr>::Err>
+where
+    T: FromStr,
+    C: FromIterator<T>,
+{
+    std::env::split_paths(input)
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(|p| T::from_str(&p.to_string_lossy()))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

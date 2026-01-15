@@ -253,7 +253,7 @@ variables, or CLI flags. Setting it in `mise.toml` will have no effect because
 config file discovery has already occurred by the time `mise.toml` is read.
 """
 env = "MISE_CEILING_PATHS"
-parse_env = "list_by_colon"
+parse_env = "list_by_path_sep"
 rc = true
 rust_type = "BTreeSet<PathBuf>"
 type = "ListPath"
@@ -700,7 +700,7 @@ variables, or CLI flags. Setting it in `mise.toml` will have no effect because
 config file discovery has already occurred by the time `mise.toml` is read.
 """
 env = "MISE_IGNORED_CONFIG_PATHS"
-parse_env = "list_by_colon"
+parse_env = "list_by_path_sep"
 rc = true
 rust_type = "BTreeSet<PathBuf>"
 type = "ListPath"
@@ -1523,7 +1523,7 @@ platform conventions for the PATH environment variable. On most Unix platforms,
 the separator is `:` and on Windows it is `;`.
 """
 env = "MISE_TASK_DISABLE_PATHS"
-parse_env = "list_by_colon"
+parse_env = "list_by_path_sep"
 rust_type = "BTreeSet<PathBuf>"
 type = "ListPath"
 
@@ -1626,7 +1626,7 @@ platform conventions for the PATH environment variable. On most Unix platforms,
 the separator is `:` and on Windows it is `;`.
 """
 env = "MISE_TRUSTED_CONFIG_PATHS"
-parse_env = "list_by_colon"
+parse_env = "list_by_path_sep"
 rust_type = "BTreeSet<PathBuf>"
 type = "ListPath"
 
