@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Test for platform-specific path separators in path array settings
+# Tests that MISE_CEILING_PATHS, MISE_IGNORED_CONFIG_PATHS, 
+# MISE_TRUSTED_CONFIG_PATHS, and MISE_TASK_DISABLE_PATHS
+# all use colon separator on Unix
+
+TEST_ROOT=$(pwd)
+
+# Setup directory structure
+mkdir -p "$TEST_ROOT/project1" "$TEST_ROOT/project2" "$TEST_ROOT/project3"
+
+# Test 1: MISE_CEILING_PATHS with multiple paths
+echo "Test 1: MISE_CEILING_PATHS with colon separator"
+mkdir -p "$TEST_ROOT/project1/subdir" "$TEST_ROOT/project2/subdir"
+
+cat <<EOF >"$TEST_ROOT/project1/subdir/.mise.toml"
+[env]
+PROJECT1 = "true"
+EOF
+
+cat <<EOF >"$TEST_ROOT/project2/subdir/.mise.toml"
+[env]
+PROJECT2 = "true"
+EOF
+
+cd "$TEST_ROOT/project1/subdir"
+# Set multiple ceiling paths using colon separator
+# Ceiling at project1 and project2 means search stops before reaching those dirs
+export MISE_CEILING_PATHS="$TEST_ROOT/project1:$TEST_ROOT/project2"
+assert_contains "mise env" "export PROJECT1=true"
+unset MISE_CEILING_PATHS
+echo "Test 1: Passed"
+
+# Test 2: MISE_IGNORED_CONFIG_PATHS with multiple paths
+echo "Test 2: MISE_IGNORED_CONFIG_PATHS with colon separator"
+mkdir -p "$TEST_ROOT/ignored" "$TEST_ROOT/not_ignored"
+cat <<EOF >"$TEST_ROOT/ignored/.mise.toml"
+[env]
+IGNORED = "should_not_appear"
+EOF
+
+cat <<EOF >"$TEST_ROOT/not_ignored/.mise.toml"
+[env]
+NOT_IGNORED = "true"
+EOF
+
+# Use absolute paths with colon separator
+export MISE_IGNORED_CONFIG_PATHS="$TEST_ROOT/ignored/.mise.toml:$TEST_ROOT/project1/subdir/.mise.toml"
+cd "$TEST_ROOT/ignored"
+assert_not_contains "mise env" "export IGNORED="
+unset MISE_IGNORED_CONFIG_PATHS
+echo "Test 2: Passed"
+
+# Test 3: MISE_TASK_DISABLE_PATHS with multiple paths
+echo "Test 3: MISE_TASK_DISABLE_PATHS with colon separator"
+mkdir -p "$TEST_ROOT/tasks1/.mise/tasks" "$TEST_ROOT/tasks2/.mise/tasks"
+
+cat <<EOF >"$TEST_ROOT/tasks1/.mise/tasks/test"
+#!/usr/bin/env bash
+echo "task1"
+EOF
+chmod +x "$TEST_ROOT/tasks1/.mise/tasks/test"
+
+cat <<EOF >"$TEST_ROOT/tasks2/.mise/tasks/test2"
+#!/usr/bin/env bash
+echo "task2"
+EOF
+chmod +x "$TEST_ROOT/tasks2/.mise/tasks/test2"
+
+cd "$TEST_ROOT/tasks1"
+# Disable tasks in tasks1 using colon separator
+export MISE_TASK_DISABLE_PATHS="$TEST_ROOT/tasks1:$TEST_ROOT/tasks2"
+# Should not find test or test2
+assert_not_contains "mise tasks --no-header" "test"
+unset MISE_TASK_DISABLE_PATHS
+echo "Test 3: Passed"
+
+# Test 4: MISE_TRUSTED_CONFIG_PATHS with multiple paths
+echo "Test 4: MISE_TRUSTED_CONFIG_PATHS with colon separator"
+mkdir -p "$TEST_ROOT/trusted1" "$TEST_ROOT/trusted2"
+
+cat <<EOF >"$TEST_ROOT/trusted1/mise.toml"
+[env]
+TRUSTED1 = "value"
+EOF
+
+cat <<EOF >"$TEST_ROOT/trusted2/mise.toml"
+[env]
+TRUSTED2 = "value"
+EOF
+
+# Set multiple trusted paths using colon separator
+export MISE_TRUSTED_CONFIG_PATHS="$TEST_ROOT/trusted1:$TEST_ROOT/trusted2"
+cd "$TEST_ROOT/trusted1"
+# Config should be automatically trusted
+assert_contains "mise env" "export TRUSTED1=value"
+unset MISE_TRUSTED_CONFIG_PATHS
+echo "Test 4: Passed"
+
+echo "All tests passed!"
