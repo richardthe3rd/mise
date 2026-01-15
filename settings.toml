@@ -244,6 +244,10 @@ Setting this to a list of directories will stop the search when one of
 those directories is reached. This is useful to prevent mise from searching
 outside of a project directory.
 
+When setting this via environment variable, paths are separated according to
+platform conventions for the PATH environment variable. On most Unix platforms,
+the separator is `:` and on Windows it is `;`.
+
 This is an early-init setting: it must be set in `.miserc.toml`, environment
 variables, or CLI flags. Setting it in `mise.toml` will have no effect because
 config file discovery has already occurred by the time `mise.toml` is read.
@@ -686,6 +690,10 @@ default = []
 description = "This is a list of config paths that mise will ignore."
 docs = """
 This is a list of config paths that mise will ignore.
+
+When setting this via environment variable, paths are separated according to
+platform conventions for the PATH environment variable. On most Unix platforms,
+the separator is `:` and on Windows it is `;`.
 
 This is an early-init setting: it must be set in `.miserc.toml`, environment
 variables, or CLI flags. Setting it in `mise.toml` will have no effect because
@@ -1507,6 +1515,13 @@ type = "Path"
 [task_disable_paths]
 default = []
 description = "Paths that mise will not look for tasks in."
+docs = """
+Paths that mise will not look for tasks in.
+
+When setting this via environment variable, paths are separated according to
+platform conventions for the PATH environment variable. On most Unix platforms,
+the separator is `:` and on Windows it is `;`.
+"""
 env = "MISE_TASK_DISABLE_PATHS"
 parse_env = "list_by_colon"
 rust_type = "BTreeSet<PathBuf>"
@@ -1603,6 +1618,13 @@ type = "Bool"
 [trusted_config_paths]
 default = []
 description = "This is a list of config paths that mise will automatically mark as trusted."
+docs = """
+This is a list of config paths that mise will automatically mark as trusted.
+
+When setting this via environment variable, paths are separated according to
+platform conventions for the PATH environment variable. On most Unix platforms,
+the separator is `:` and on Windows it is `;`.
+"""
 env = "MISE_TRUSTED_CONFIG_PATHS"
 parse_env = "list_by_colon"
 rust_type = "BTreeSet<PathBuf>"
