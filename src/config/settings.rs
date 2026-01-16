@@ -573,7 +573,9 @@ pub fn parse_url_replacements(input: &str) -> Result<IndexMap<String, String>, s
 }
 
 /// Parse path list using platform-specific separator (`:` on Unix, `;` on Windows)
-/// This uses std::env::split_paths which handles platform conventions.
+/// 
+/// On Windows, paths are separated by semicolons (`;`) to avoid ambiguity with drive letters (e.g., `C:\path`).
+/// On Unix, paths are separated by colons (`:`) following standard PATH conventions.
 ///
 /// Note: This converts paths to strings using to_string_lossy(), which may replace
 /// invalid UTF-8 sequences with replacement characters. This is acceptable since:
@@ -585,9 +587,16 @@ where
     T: FromStr,
     C: FromIterator<T>,
 {
-    std::env::split_paths(input)
-        .filter(|p| !p.as_os_str().is_empty())
-        .map(|p| T::from_str(&p.to_string_lossy()))
+    // Use platform-specific separator based on target OS
+    #[cfg(windows)]
+    const SEP: char = ';';
+    #[cfg(not(windows))]
+    const SEP: char = ':';
+    
+    input
+        .split(SEP)
+        .filter(|s| !s.is_empty())
+        .map(|s| T::from_str(s))
         .collect()
 }
 

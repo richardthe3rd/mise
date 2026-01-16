@@ -164,8 +164,15 @@ pub static MISE_IGNORED_CONFIG_PATHS: Lazy<Vec<PathBuf>> = Lazy::new(|| {
     var("MISE_IGNORED_CONFIG_PATHS")
         .ok()
         .map(|v| {
-            split_paths(&v)
-                .filter(|p| !p.as_os_str().is_empty())
+            // Use platform-specific separator: `;` on Windows, `:` on Unix
+            #[cfg(windows)]
+            const SEP: char = ';';
+            #[cfg(not(windows))]
+            const SEP: char = ':';
+            
+            v.split(SEP)
+                .filter(|p| !p.is_empty())
+                .map(PathBuf::from)
                 .map(replace_path)
                 .collect()
         })
@@ -179,8 +186,15 @@ pub static MISE_CEILING_PATHS: Lazy<HashSet<PathBuf>> = Lazy::new(|| {
     var("MISE_CEILING_PATHS")
         .ok()
         .map(|v| {
-            split_paths(&v)
-                .filter(|p| !p.as_os_str().is_empty())
+            // Use platform-specific separator: `;` on Windows, `:` on Unix
+            #[cfg(windows)]
+            const SEP: char = ';';
+            #[cfg(not(windows))]
+            const SEP: char = ':';
+            
+            v.split(SEP)
+                .filter(|p| !p.is_empty())
+                .map(PathBuf::from)
                 .map(replace_path)
                 .collect()
         })
