@@ -588,14 +588,7 @@ where
     C: FromIterator<T>,
 {
     std::env::split_paths(input)
-        .filter_map(|p| {
-            let s = p.to_string_lossy();
-            if s.is_empty() {
-                None
-            } else {
-                Some(T::from_str(&s))
-            }
-        })
+        .map(|p| T::from_str(&p.to_string_lossy()))
         .collect()
 }
 

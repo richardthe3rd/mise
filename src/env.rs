@@ -141,14 +141,14 @@ pub static MISE_DEFAULT_CONFIG_FILENAME: Lazy<String> = Lazy::new(|| {
 pub static MISE_OVERRIDE_TOOL_VERSIONS_FILENAMES: Lazy<Option<IndexSet<String>>> =
     Lazy::new(|| match var("MISE_OVERRIDE_TOOL_VERSIONS_FILENAMES") {
         Ok(v) if v == "none" => Some([].into()),
-        Ok(v) => Some(split_paths(&v).map(|p| p.to_string_lossy().to_string()).collect()),
+        Ok(v) => Some(split_paths(&v).map(|p| p.to_string_lossy().into_owned()).collect()),
         Err(_) => {
             miserc::get_override_tool_versions_filenames().map(|v| v.iter().cloned().collect())
         }
     });
 pub static MISE_OVERRIDE_CONFIG_FILENAMES: Lazy<IndexSet<String>> =
     Lazy::new(|| match var("MISE_OVERRIDE_CONFIG_FILENAMES") {
-        Ok(v) => split_paths(&v).map(|p| p.to_string_lossy().to_string()).collect(),
+        Ok(v) => split_paths(&v).map(|p| p.to_string_lossy().into_owned()).collect(),
         Err(_) => miserc::get_override_config_filenames()
             .map(|v| v.iter().cloned().collect())
             .unwrap_or_default(),
