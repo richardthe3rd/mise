@@ -141,14 +141,14 @@ pub static MISE_DEFAULT_CONFIG_FILENAME: Lazy<String> = Lazy::new(|| {
 pub static MISE_OVERRIDE_TOOL_VERSIONS_FILENAMES: Lazy<Option<IndexSet<String>>> =
     Lazy::new(|| match var("MISE_OVERRIDE_TOOL_VERSIONS_FILENAMES") {
         Ok(v) if v == "none" => Some([].into()),
-        Ok(v) => Some(v.split(':').map(|s| s.to_string()).collect()),
+        Ok(v) => Some(split_paths(&v).map(|p| p.to_string_lossy().to_string()).collect()),
         Err(_) => {
             miserc::get_override_tool_versions_filenames().map(|v| v.iter().cloned().collect())
         }
     });
 pub static MISE_OVERRIDE_CONFIG_FILENAMES: Lazy<IndexSet<String>> =
     Lazy::new(|| match var("MISE_OVERRIDE_CONFIG_FILENAMES") {
-        Ok(v) => v.split(':').map(|s| s.to_string()).collect(),
+        Ok(v) => split_paths(&v).map(|p| p.to_string_lossy().to_string()).collect(),
         Err(_) => miserc::get_override_config_filenames()
             .map(|v| v.iter().cloned().collect())
             .unwrap_or_default(),
@@ -164,15 +164,7 @@ pub static MISE_IGNORED_CONFIG_PATHS: Lazy<Vec<PathBuf>> = Lazy::new(|| {
     var("MISE_IGNORED_CONFIG_PATHS")
         .ok()
         .map(|v| {
-            // Use platform-specific separator: `;` on Windows, `:` on Unix
-            #[cfg(windows)]
-            const SEP: char = ';';
-            #[cfg(not(windows))]
-            const SEP: char = ':';
-            
-            v.split(SEP)
-                .filter(|p| !p.is_empty())
-                .map(PathBuf::from)
+            split_paths(&v)
                 .map(replace_path)
                 .collect()
         })
@@ -186,15 +178,7 @@ pub static MISE_CEILING_PATHS: Lazy<HashSet<PathBuf>> = Lazy::new(|| {
     var("MISE_CEILING_PATHS")
         .ok()
         .map(|v| {
-            // Use platform-specific separator: `;` on Windows, `:` on Unix
-            #[cfg(windows)]
-            const SEP: char = ';';
-            #[cfg(not(windows))]
-            const SEP: char = ':';
-            
-            v.split(SEP)
-                .filter(|p| !p.is_empty())
-                .map(PathBuf::from)
+            split_paths(&v)
                 .map(replace_path)
                 .collect()
         })

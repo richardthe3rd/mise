@@ -587,16 +587,15 @@ where
     T: FromStr,
     C: FromIterator<T>,
 {
-    // Use platform-specific separator based on target OS
-    #[cfg(windows)]
-    const SEP: char = ';';
-    #[cfg(not(windows))]
-    const SEP: char = ':';
-    
-    input
-        .split(SEP)
-        .filter(|s| !s.is_empty())
-        .map(|s| T::from_str(s))
+    std::env::split_paths(input)
+        .filter_map(|p| {
+            let s = p.to_string_lossy();
+            if s.is_empty() {
+                None
+            } else {
+                Some(T::from_str(&s))
+            }
+        })
         .collect()
 }
 
