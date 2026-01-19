@@ -432,6 +432,9 @@ pub static NVM_DIR: Lazy<PathBuf> =
 pub static NODENV_ROOT: Lazy<PathBuf> =
     Lazy::new(|| var_path("NODENV_ROOT").unwrap_or_else(|| HOME.join(".nodenv")));
 
+/// Platform-specific PATH environment variable separator.
+/// Use `std::env::split_paths()` for splitting PATH-like strings instead of this constant.
+/// This constant is mainly for compatibility with clap's `value_delimiter`.
 #[cfg(unix)]
 pub const PATH_ENV_SEP: char = ':';
 #[cfg(windows)]
