@@ -442,7 +442,12 @@ impl BackendArg {
             && let Some((prefix, _)) = self.short.split_once(':')
             && let Some(def) = Config::get_().backend_aliases.get(prefix)
         {
-            opts.opts.extend(def.opts().opts);
+            let alias_opts = def.opts();
+            opts.opts.extend(alias_opts.opts);
+            opts.install_env.extend(alias_opts.install_env);
+            if alias_opts.os.is_some() {
+                opts.os = alias_opts.os;
+            }
         }
 
         // Get user-provided options (from self.opts or from full string)

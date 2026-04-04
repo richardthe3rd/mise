@@ -1559,16 +1559,16 @@ fn load_aliases(config_files: &ConfigMap) -> Result<AliasMap> {
 
 fn load_user_backends(config_files: &ConfigMap) -> Result<BackendAliasMap> {
     let mut backend_aliases = BackendAliasMap::new();
-    for config_file in config_files.values() {
+    for config_file in config_files.values().rev() {
         for (name, def) in config_file.backend_aliases() {
             if BackendType::guess(&def.backend) == BackendType::Unknown {
                 bail!(
-                    "backend_alias '{}' has unknown backend '{}'. Valid backends: aqua, asdf, cargo, gem, github, gitlab, go, npm, pipx, ubi, vfox",
+                    "backend_alias '{}' has unknown backend '{}'. Valid backends: aqua, asdf, cargo, conda, core, dotnet, forgejo, gem, github, gitlab, go, http, npm, pipx, spm, ubi, vfox",
                     name,
                     def.backend
                 );
             }
-            backend_aliases.insert(name, def);
+            backend_aliases.entry(name).or_insert(def);
         }
     }
     trace!("load_user_backends: {}", backend_aliases.len());
