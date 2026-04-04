@@ -324,6 +324,7 @@ impl BackendArg {
             }
 
             if let Some((prefix, tool_name)) = short.split_once(':')
+                && BackendType::guess(prefix) == BackendType::Unknown
                 && let Some(def) = Config::get_().backend_aliases.get(prefix)
             {
                 return format!("{}:{}", def.backend, tool_name);
