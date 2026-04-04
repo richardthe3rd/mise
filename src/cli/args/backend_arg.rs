@@ -323,9 +323,8 @@ impl BackendArg {
                 return format!("asdf:{url}");
             }
 
-            // Resolve user-defined backend aliases (e.g. "mygitlab:org/tool" -> "gitlab:org/tool")
             if let Some((prefix, tool_name)) = short.split_once(':') {
-                if let Some(def) = Config::get_().user_backends.get(prefix) {
+                if let Some(def) = Config::get_().backend_aliases.get(prefix) {
                     return format!("{}:{}", def.backend, tool_name);
                 }
             }
@@ -438,15 +437,11 @@ impl BackendArg {
             .map(|rt| rt.backend_options(&full))
             .unwrap_or_default();
 
-        // Merge backend alias defaults on top of registry opts (higher priority than registry,
-        // lower than tool-specific opts applied below)
+        // backend_alias defaults sit between registry opts (lower) and per-tool opts (higher)
         if config::is_loaded() {
             if let Some((prefix, _)) = self.short.split_once(':') {
-                if let Some(def) = Config::get_().user_backends.get(prefix) {
-                    let alias_opts = def.opts();
-                    for (k, v) in alias_opts.opts {
-                        opts.opts.insert(k, v);
-                    }
+                if let Some(def) = Config::get_().backend_aliases.get(prefix) {
+                    opts.opts.extend(def.opts().opts);
                 }
             }
         }

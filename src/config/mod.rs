@@ -61,7 +61,7 @@ pub struct Config {
     pub project_root: Option<PathBuf>,
     pub all_aliases: AliasMap,
     pub repo_urls: HashMap<String, String>,
-    pub user_backends: BackendAliasMap,
+    pub backend_aliases: BackendAliasMap,
     pub vars: IndexMap<String, String>,
     pub tera_ctx: tera::Context,
     pub shorthands: Shorthands,
@@ -88,23 +88,17 @@ pub struct Alias {
 
 /// A user-defined backend alias with a base backend and default options.
 /// Defined in `[backend_alias]` sections of mise.toml files.
-#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct UserBackendDef {
-    /// The base backend name (e.g., "gitlab", "github", "cargo")
     pub backend: String,
-    /// Default options to pre-fill (e.g., api_url for private instances).
-    /// Stored as raw toml values to avoid nested-flatten issues with toml crate.
     #[serde(flatten)]
     opts_raw: IndexMap<String, toml::Value>,
 }
 
 impl UserBackendDef {
-    /// Returns default options as a `ToolVersionOptions`.
     pub fn opts(&self) -> ToolVersionOptions {
         let mut tvo = ToolVersionOptions::default();
-        for (k, v) in &self.opts_raw {
-            tvo.opts.insert(k.clone(), v.clone());
-        }
+        tvo.merge(&self.opts_raw);
         tvo
     }
 }
@@ -179,7 +173,7 @@ impl Config {
             aliases: Default::default(),
             project_root: Default::default(),
             repo_urls: Default::default(),
-            user_backends: Default::default(),
+            backend_aliases: Default::default(),
             shell_aliases: Default::default(),
             tera_files: Default::default(),
             vars: Default::default(),
@@ -200,7 +194,7 @@ impl Config {
             aliases: config.aliases.clone(),
             project_root: config.project_root.clone(),
             repo_urls: config.repo_urls.clone(),
-            user_backends: Default::default(),
+            backend_aliases: Default::default(),
             shell_aliases: config.shell_aliases.clone(),
             tera_files: config.tera_files.clone(),
             vars: config.vars.clone(),
@@ -223,7 +217,7 @@ impl Config {
 
         config.vars = vars;
         config.aliases = load_aliases(&config.config_files)?;
-        config.user_backends = load_user_backends(&config.config_files);
+        config.backend_aliases = load_user_backends(&config.config_files);
         // Clear any previously tracked files before loading shell aliases
         let _ = take_tera_accessed_files();
         config.shell_aliases = load_shell_aliases(&config.config_files)?;
