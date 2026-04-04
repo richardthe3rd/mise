@@ -1564,14 +1564,22 @@ fn load_user_backends(config_files: &ConfigMap) -> Result<BackendAliasMap> {
     let mut backend_aliases = BackendAliasMap::new();
     for config_file in config_files.values().rev() {
         for (name, def) in config_file.backend_aliases() {
-            if BackendType::guess(&def.backend) == BackendType::Unknown {
-                bail!(
-                    "backend_alias '{}' has unknown backend '{}'. Valid backends: aqua, asdf, cargo, conda, core, dotnet, forgejo, gem, github, gitlab, go, http, npm, pipx, spm, ubi, vfox",
-                    name,
-                    def.backend
-                );
-            }
             backend_aliases.insert(name, def);
+        }
+    }
+    for (name, def) in &backend_aliases {
+        if BackendType::guess(&def.backend) == BackendType::Unknown {
+            use strum::IntoEnumIterator;
+            let valid: Vec<String> = BackendType::iter()
+                .filter(|bt| !matches!(bt, BackendType::Unknown | BackendType::VfoxBackend(_)))
+                .map(|bt| bt.to_string())
+                .collect();
+            bail!(
+                "backend_alias '{}' has unknown backend '{}'. Valid backends: {}",
+                name,
+                def.backend,
+                valid.join(", ")
+            );
         }
     }
     trace!("load_user_backends: {}", backend_aliases.len());
