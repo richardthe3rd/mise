@@ -14,8 +14,8 @@ use std::time::{Duration, SystemTime};
 use tokio::{sync::OnceCell, task::JoinSet};
 use walkdir::WalkDir;
 
-use crate::backend::backend_type::BackendType;
 use crate::backend::ABackend;
+use crate::backend::backend_type::BackendType;
 use crate::cli::args::BackendArg;
 use crate::cli::version;
 use crate::config::config_file::idiomatic_version::IdiomaticVersionFile;

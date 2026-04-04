@@ -323,11 +323,10 @@ impl BackendArg {
                 return format!("asdf:{url}");
             }
 
-            if let Some((prefix, tool_name)) = short.split_once(':') {
-                if let Some(def) = Config::get_().backend_aliases.get(prefix) {
+            if let Some((prefix, tool_name)) = short.split_once(':')
+                && let Some(def) = Config::get_().backend_aliases.get(prefix) {
                     return format!("{}:{}", def.backend, tool_name);
                 }
-            }
 
             let config = Config::get_();
             if let Some(backend) = lockfile::get_locked_backend(&config, short) {
@@ -438,13 +437,11 @@ impl BackendArg {
             .unwrap_or_default();
 
         // backend_alias defaults sit between registry opts (lower) and per-tool opts (higher)
-        if config::is_loaded() {
-            if let Some((prefix, _)) = self.short.split_once(':') {
-                if let Some(def) = Config::get_().backend_aliases.get(prefix) {
+        if config::is_loaded()
+            && let Some((prefix, _)) = self.short.split_once(':')
+                && let Some(def) = Config::get_().backend_aliases.get(prefix) {
                     opts.opts.extend(def.opts().opts);
                 }
-            }
-        }
 
         // Get user-provided options (from self.opts or from full string)
         let user_opts = self.opts.clone().unwrap_or_else(|| {
@@ -740,5 +737,4 @@ mod tests {
             fa.full_with_opts()
         );
     }
-
 }
