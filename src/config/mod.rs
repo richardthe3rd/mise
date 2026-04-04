@@ -14,6 +14,7 @@ use std::time::{Duration, SystemTime};
 use tokio::{sync::OnceCell, task::JoinSet};
 use walkdir::WalkDir;
 
+use crate::backend::backend_type::BackendType;
 use crate::backend::ABackend;
 use crate::cli::args::BackendArg;
 use crate::cli::version;
@@ -217,7 +218,7 @@ impl Config {
 
         config.vars = vars;
         config.aliases = load_aliases(&config.config_files)?;
-        config.backend_aliases = load_user_backends(&config.config_files);
+        config.backend_aliases = load_user_backends(&config.config_files)?;
         // Clear any previously tracked files before loading shell aliases
         let _ = take_tera_accessed_files();
         config.shell_aliases = load_shell_aliases(&config.config_files)?;
@@ -1556,15 +1557,22 @@ fn load_aliases(config_files: &ConfigMap) -> Result<AliasMap> {
     Ok(aliases)
 }
 
-fn load_user_backends(config_files: &ConfigMap) -> BackendAliasMap {
-    let mut user_backends = BackendAliasMap::new();
+fn load_user_backends(config_files: &ConfigMap) -> Result<BackendAliasMap> {
+    let mut backend_aliases = BackendAliasMap::new();
     for config_file in config_files.values() {
         for (name, def) in config_file.backend_aliases() {
-            user_backends.insert(name, def);
+            if BackendType::guess(&def.backend) == BackendType::Unknown {
+                bail!(
+                    "backend_alias '{}' has unknown backend '{}'. Valid backends: aqua, asdf, cargo, gem, github, gitlab, go, npm, pipx, ubi, vfox",
+                    name,
+                    def.backend
+                );
+            }
+            backend_aliases.insert(name, def);
         }
     }
-    trace!("load_user_backends: {}", user_backends.len());
-    user_backends
+    trace!("load_user_backends: {}", backend_aliases.len());
+    Ok(backend_aliases)
 }
 
 fn load_shell_aliases(config_files: &ConfigMap) -> Result<EnvWithSources> {
