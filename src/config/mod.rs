@@ -98,11 +98,12 @@ pub struct UserBackendDef {
 
 impl UserBackendDef {
     pub fn opts(&self) -> ToolVersionOptions {
-        let table: toml::map::Map<String, toml::Value> =
-            self.opts_raw.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        toml::Value::Table(table)
-            .try_into()
-            .unwrap_or_default()
+        let table: toml::map::Map<String, toml::Value> = self
+            .opts_raw
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        toml::Value::Table(table).try_into().unwrap_or_default()
     }
 }
 
