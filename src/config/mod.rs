@@ -52,6 +52,7 @@ use crate::watch_files::WatchFile;
 use crate::wildcard::Wildcard;
 
 type AliasMap = IndexMap<String, Alias>;
+pub type BackendAliasMap = IndexMap<String, UserBackendDef>;
 pub(crate) type ConfigMap = IndexMap<PathBuf, Arc<dyn ConfigFile>>;
 pub type EnvWithSources = IndexMap<String, (String, PathBuf)>;
 
@@ -60,6 +61,7 @@ pub struct Config {
     pub project_root: Option<PathBuf>,
     pub all_aliases: AliasMap,
     pub repo_urls: HashMap<String, String>,
+    pub user_backends: BackendAliasMap,
     pub vars: IndexMap<String, String>,
     pub tera_ctx: tera::Context,
     pub shorthands: Shorthands,
@@ -82,6 +84,29 @@ pub struct Config {
 pub struct Alias {
     pub backend: Option<String>,
     pub versions: IndexMap<String, String>,
+}
+
+/// A user-defined backend alias with a base backend and default options.
+/// Defined in `[backend_alias]` sections of mise.toml files.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct UserBackendDef {
+    /// The base backend name (e.g., "gitlab", "github", "cargo")
+    pub backend: String,
+    /// Default options to pre-fill (e.g., api_url for private instances).
+    /// Stored as raw toml values to avoid nested-flatten issues with toml crate.
+    #[serde(flatten)]
+    opts_raw: IndexMap<String, toml::Value>,
+}
+
+impl UserBackendDef {
+    /// Returns default options as a `ToolVersionOptions`.
+    pub fn opts(&self) -> ToolVersionOptions {
+        let mut tvo = ToolVersionOptions::default();
+        for (k, v) in &self.opts_raw {
+            tvo.opts.insert(k.clone(), v.clone());
+        }
+        tvo
+    }
 }
 
 static _CONFIG: RwLock<Option<Arc<Config>>> = RwLock::new(None);
@@ -154,6 +179,7 @@ impl Config {
             aliases: Default::default(),
             project_root: Default::default(),
             repo_urls: Default::default(),
+            user_backends: Default::default(),
             shell_aliases: Default::default(),
             tera_files: Default::default(),
             vars: Default::default(),
@@ -174,6 +200,7 @@ impl Config {
             aliases: config.aliases.clone(),
             project_root: config.project_root.clone(),
             repo_urls: config.repo_urls.clone(),
+            user_backends: Default::default(),
             shell_aliases: config.shell_aliases.clone(),
             tera_files: config.tera_files.clone(),
             vars: config.vars.clone(),
@@ -196,6 +223,7 @@ impl Config {
 
         config.vars = vars;
         config.aliases = load_aliases(&config.config_files)?;
+        config.user_backends = load_user_backends(&config.config_files);
         // Clear any previously tracked files before loading shell aliases
         let _ = take_tera_accessed_files();
         config.shell_aliases = load_shell_aliases(&config.config_files)?;
@@ -1532,6 +1560,17 @@ fn load_aliases(config_files: &ConfigMap) -> Result<AliasMap> {
     trace!("load_aliases: {}", aliases.len());
 
     Ok(aliases)
+}
+
+fn load_user_backends(config_files: &ConfigMap) -> BackendAliasMap {
+    let mut user_backends = BackendAliasMap::new();
+    for config_file in config_files.values() {
+        for (name, def) in config_file.backend_aliases() {
+            user_backends.insert(name, def);
+        }
+    }
+    trace!("load_user_backends: {}", user_backends.len());
+    user_backends
 }
 
 fn load_shell_aliases(config_files: &ConfigMap) -> Result<EnvWithSources> {

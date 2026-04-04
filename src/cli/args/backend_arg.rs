@@ -323,6 +323,13 @@ impl BackendArg {
                 return format!("asdf:{url}");
             }
 
+            // Resolve user-defined backend aliases (e.g. "mygitlab:org/tool" -> "gitlab:org/tool")
+            if let Some((prefix, tool_name)) = short.split_once(':') {
+                if let Some(def) = Config::get_().user_backends.get(prefix) {
+                    return format!("{}:{}", def.backend, tool_name);
+                }
+            }
+
             let config = Config::get_();
             if let Some(backend) = lockfile::get_locked_backend(&config, short) {
                 return backend;
@@ -431,6 +438,19 @@ impl BackendArg {
             .map(|rt| rt.backend_options(&full))
             .unwrap_or_default();
 
+        // Merge backend alias defaults on top of registry opts (higher priority than registry,
+        // lower than tool-specific opts applied below)
+        if config::is_loaded() {
+            if let Some((prefix, _)) = self.short.split_once(':') {
+                if let Some(def) = Config::get_().user_backends.get(prefix) {
+                    let alias_opts = def.opts();
+                    for (k, v) in alias_opts.opts {
+                        opts.opts.insert(k, v);
+                    }
+                }
+            }
+        }
+
         // Get user-provided options (from self.opts or from full string)
         let user_opts = self.opts.clone().unwrap_or_else(|| {
             if let Some((_, opts_str)) = split_bracketed_opts(&full) {
@@ -440,7 +460,7 @@ impl BackendArg {
             }
         });
 
-        // Merge user options on top (user options take precedence)
+        // Merge user options on top (user options take precedence over alias defaults)
         for (k, v) in user_opts.opts {
             opts.opts.insert(k, v);
         }
@@ -725,4 +745,5 @@ mod tests {
             fa.full_with_opts()
         );
     }
+
 }
