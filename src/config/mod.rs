@@ -1568,7 +1568,7 @@ fn load_user_backends(config_files: &ConfigMap) -> Result<BackendAliasMap> {
                     def.backend
                 );
             }
-            backend_aliases.entry(name).or_insert(def);
+            backend_aliases.insert(name, def);
         }
     }
     trace!("load_user_backends: {}", backend_aliases.len());
