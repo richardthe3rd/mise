@@ -91,9 +91,17 @@ async fn which_shim(config: &mut Arc<Config>, bin_name: &str) -> Result<PathBuf>
     let mise_bin = fs::canonicalize(&*env::MISE_BIN).unwrap_or_else(|_| env::MISE_BIN.clone());
     let user_shims = fs::canonicalize(*dirs::SHIMS).unwrap_or_default();
     let sys_shims = {
-        let p = env::MISE_SYSTEM_DATA_DIR.join("shims");
-        if p.exists() {
-            fs::canonicalize(&p).unwrap_or(p)
+        #[cfg(windows)]
+        let trusted = *crate::env::WINDOWS_SYSTEM_DIR_TRUSTED;
+        #[cfg(not(windows))]
+        let trusted = true;
+        if trusted {
+            let p = env::MISE_SYSTEM_DATA_DIR.join("shims");
+            if p.exists() {
+                fs::canonicalize(&p).unwrap_or(p)
+            } else {
+                PathBuf::new()
+            }
         } else {
             PathBuf::new()
         }

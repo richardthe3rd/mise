@@ -219,6 +219,15 @@ impl Install {
     }
 
     fn install_opts(&self) -> Result<InstallOptions> {
+        #[cfg(windows)]
+        if self.system && !*crate::env::WINDOWS_SYSTEM_DIR_TRUSTED {
+            warn!(
+                "mise: system install directory {} is not trusted (failed ownership/write check). \
+                 Tools installed there will be ignored by other users. \
+                 Run as Administrator to fix ownership.",
+                env::MISE_SYSTEM_INSTALLS_DIR.display()
+            );
+        }
         let install_dir = if self.system {
             Some(env::MISE_SYSTEM_INSTALLS_DIR.clone())
         } else {

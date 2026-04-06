@@ -1271,6 +1271,10 @@ pub fn global_config_files() -> IndexSet<PathBuf> {
 }
 
 pub fn system_config_files() -> IndexSet<PathBuf> {
+    #[cfg(windows)]
+    if !*crate::env::WINDOWS_SYSTEM_DIR_TRUSTED {
+        return IndexSet::new();
+    }
     let mut s = SYSTEM_CONFIG_FILES.lock().unwrap();
     if let Some(s) = &*s {
         return s.clone();
@@ -1704,8 +1708,14 @@ fn default_task_includes() -> Vec<String> {
 }
 
 fn is_global_task_include_path(path: &Path) -> bool {
-    path.starts_with(dirs::CONFIG.join("tasks"))
-        || path.starts_with(dirs::SYSTEM_CONFIG.join("tasks"))
+    if path.starts_with(dirs::CONFIG.join("tasks")) {
+        return true;
+    }
+    #[cfg(windows)]
+    if !*crate::env::WINDOWS_SYSTEM_DIR_TRUSTED {
+        return false;
+    }
+    path.starts_with(dirs::SYSTEM_CONFIG.join("tasks"))
 }
 
 #[async_backtrace::framed]

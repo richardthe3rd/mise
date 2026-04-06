@@ -121,6 +121,8 @@ impl Doctor {
         self.analyze_plugins();
         self.analyze_backend_mismatches();
         self.check_path_ordering(ts, &config).await;
+        #[cfg(windows)]
+        self.check_windows_system_dir();
         data.insert(
             "paths".into(),
             self.paths(ts)
@@ -373,6 +375,27 @@ impl Doctor {
         Ok(())
     }
 
+    #[cfg(windows)]
+    fn check_windows_system_dir(&mut self) {
+        use crate::env::WINDOWS_SYSTEM_DIR_TRUSTED;
+        // Only warn if the system dir was rejected (not just absent)
+        if !*WINDOWS_SYSTEM_DIR_TRUSTED {
+            let dir = crate::env::windows_programdata_mise();
+            self.warnings.push(format!(
+                "System directory {} exists but is not owned by Administrators or SYSTEM \
+                 and/or is writable by standard users.\n\
+                 Mise is ignoring it to prevent privilege escalation.\n\
+                 Fix (run as Administrator):\n  \
+                 icacls \"{display}\" /setowner \"Administrators\" /T /C\n  \
+                 icacls \"{display}\" /inheritance:r /grant \"Administrators:(OI)(CI)F\" \
+                 /grant \"SYSTEM:(OI)(CI)F\" /grant \"Users:(OI)(CI)RX\"\n\
+                 Override: set MISE_SYSTEM_CONFIG_DIR to use a trusted path.",
+                dir.display(),
+                display = dir.display(),
+            ));
+        }
+    }
+
     async fn analyze_shims(&mut self, config: &Arc<Config>, toolset: &Toolset) {
         let mise_bin = file::which("mise").unwrap_or(env::MISE_BIN.clone());
 
@@ -569,6 +592,8 @@ fn mise_dirs() -> Vec<(String, &'static Path)> {
         ("data", &*dirs::DATA),
         ("shims", &*dirs::SHIMS),
         ("state", &*dirs::STATE),
+        ("system_config", &*dirs::SYSTEM_CONFIG),
+        ("system_data", &*dirs::SYSTEM_DATA),
     ]
     .iter()
     .map(|(k, v)| (k.to_string(), **v))

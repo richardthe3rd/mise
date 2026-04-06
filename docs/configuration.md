@@ -362,10 +362,14 @@ status = {
 foo = "bar"
 ```
 
-## System config: `/etc/mise/config.toml`
+## System config: `/etc/mise/config.toml` (Linux/macOS), `C:\ProgramData\mise\config.toml` (Windows)
 
 Similar to `~/.config/mise/config.toml` but for all users on the system. This is useful for
 setting defaults for all users.
+
+On Windows, the directory must be owned by `BUILTIN\Administrators` or `NT AUTHORITY\SYSTEM` and
+not be writable by standard users — see [`MISE_SYSTEM_CONFIG_DIR`](#mise-system-config-dir) for
+setup instructions.
 
 ## `.tool-versions`
 
@@ -497,10 +501,24 @@ This is used for temporary storage such as when installing tools.
 
 ### `MISE_SYSTEM_CONFIG_DIR`
 
-Default: `/etc/mise`
+Default: `/etc/mise` (Linux/macOS), `%PROGRAMDATA%\mise` (Windows)
 
 This is the directory where mise stores system-wide configuration.
 `MISE_SYSTEM_DIR` is also supported as a legacy alias.
+
+**Windows security**: When using the default `%PROGRAMDATA%\mise` path, mise verifies that the
+directory is owned by `BUILTIN\Administrators` or `NT AUTHORITY\SYSTEM` and is not writable by
+standard users. If the check fails, the system directory is ignored with a warning. To set up
+the directory correctly, run in an elevated (Administrator) command prompt:
+
+```cmd
+mkdir "C:\ProgramData\mise"
+icacls "C:\ProgramData\mise" /setowner "Administrators" /T /C
+icacls "C:\ProgramData\mise" /inheritance:r /grant "Administrators:(OI)(CI)F" /grant "SYSTEM:(OI)(CI)F" /grant "Users:(OI)(CI)RX"
+```
+
+Setting `MISE_SYSTEM_CONFIG_DIR` to any value bypasses the security check (you are opting in to
+that path explicitly).
 
 ### `MISE_GLOBAL_CONFIG_FILE`
 
