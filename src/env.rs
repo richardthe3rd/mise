@@ -112,12 +112,18 @@ pub static MISE_STATE_DIR: Lazy<PathBuf> =
     Lazy::new(|| var_path("MISE_STATE_DIR").unwrap_or_else(|| XDG_STATE_HOME.join("mise")));
 pub static MISE_TMP_DIR: Lazy<PathBuf> =
     Lazy::new(|| var_path("MISE_TMP_DIR").unwrap_or_else(|| temp_dir().join("mise")));
+/// Raw system config path. **Prefer [`system_config_dir()`] in application code** — it applies
+/// the Windows trust gate automatically. Only use this static directly when you need the raw
+/// path regardless of trust (e.g. display/reporting or cleanup commands).
 #[cfg(not(windows))]
 pub static MISE_SYSTEM_CONFIG_DIR: Lazy<PathBuf> = Lazy::new(|| {
     var_path("MISE_SYSTEM_CONFIG_DIR")
         .or_else(|| var_path("MISE_SYSTEM_DIR"))
         .unwrap_or_else(|| PathBuf::from("/etc/mise"))
 });
+/// Raw system config path. **Prefer [`system_config_dir()`] in application code** — it applies
+/// the Windows trust gate automatically. Only use this static directly when you need the raw
+/// path regardless of trust (e.g. display/reporting or cleanup commands).
 #[cfg(windows)]
 pub static MISE_SYSTEM_CONFIG_DIR: Lazy<PathBuf> = Lazy::new(|| {
     var_path("MISE_SYSTEM_CONFIG_DIR")
@@ -134,11 +140,16 @@ pub static MISE_PLUGINS_DIR: Lazy<PathBuf> =
     Lazy::new(|| var_path("MISE_PLUGINS_DIR").unwrap_or_else(|| MISE_DATA_DIR.join("plugins")));
 pub static MISE_SHIMS_DIR: Lazy<PathBuf> =
     Lazy::new(|| var_path("MISE_SHIMS_DIR").unwrap_or_else(|| MISE_DATA_DIR.join("shims")));
-/// System-level data directory (like MISE_DATA_DIR but for system-wide tools).
+/// Raw system data path. **Prefer [`system_data_dir()`] in application code** — it applies
+/// the Windows trust gate automatically. Only use this static directly when you need the raw
+/// path regardless of trust (e.g. display/reporting or `mise install --system`).
 #[cfg(not(windows))]
 pub static MISE_SYSTEM_DATA_DIR: Lazy<PathBuf> = Lazy::new(|| {
     var_path("MISE_SYSTEM_DATA_DIR").unwrap_or_else(|| PathBuf::from("/usr/local/share/mise"))
 });
+/// Raw system data path. **Prefer [`system_data_dir()`] in application code** — it applies
+/// the Windows trust gate automatically. Only use this static directly when you need the raw
+/// path regardless of trust (e.g. display/reporting or `mise install --system`).
 #[cfg(windows)]
 pub static MISE_SYSTEM_DATA_DIR: Lazy<PathBuf> = Lazy::new(|| {
     var_path("MISE_SYSTEM_DATA_DIR").unwrap_or_else(windows_programdata_mise)
@@ -963,6 +974,30 @@ pub(crate) static WINDOWS_SYSTEM_DIR_TRUSTED: Lazy<bool> = Lazy::new(|| {
         }
     }
 });
+
+/// Returns the system config directory if it should be trusted, or `None` if it should be
+/// skipped (Windows untrusted dir). On non-Windows this always returns `Some`.
+/// Use this instead of `MISE_SYSTEM_CONFIG_DIR` in any code that loads or executes content
+/// from the system config directory.
+pub fn system_config_dir() -> Option<&'static Path> {
+    #[cfg(windows)]
+    if !*WINDOWS_SYSTEM_DIR_TRUSTED {
+        return None;
+    }
+    Some(&MISE_SYSTEM_CONFIG_DIR)
+}
+
+/// Returns the system data directory if it should be trusted, or `None` if it should be
+/// skipped (Windows untrusted dir). On non-Windows this always returns `Some`.
+/// Use this instead of `MISE_SYSTEM_DATA_DIR` in any code that reads shims or tool installs
+/// from the system data directory.
+pub fn system_data_dir() -> Option<&'static Path> {
+    #[cfg(windows)]
+    if !*WINDOWS_SYSTEM_DIR_TRUSTED {
+        return None;
+    }
+    Some(&MISE_SYSTEM_DATA_DIR)
+}
 
 #[cfg(test)]
 mod tests {
