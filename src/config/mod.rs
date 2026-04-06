@@ -97,6 +97,16 @@ pub struct UserBackendDef {
 }
 
 impl UserBackendDef {
+    /// Convert the raw options map into a `ToolVersionOptions`.
+    ///
+    /// NOTE: We cannot use `toml::Value::Table(...).try_into::<ToolVersionOptions>()` here
+    /// because `ToolVersionOptions` uses `#[serde(flatten)]` on its `opts` field, and the
+    /// TOML deserializer does not support nested flatten. The `try_into()` call silently
+    /// returns `Default::default()`, dropping all options.
+    ///
+    /// Instead we manually extract the structured fields (`os`, `depends`, `install_env`)
+    /// and route everything else into `opts`. If a new structured field is added to
+    /// `ToolVersionOptions`, add a matching arm here.
     pub fn opts(&self) -> ToolVersionOptions {
         let mut tvo = ToolVersionOptions::default();
         for (key, value) in &self.opts_raw {
