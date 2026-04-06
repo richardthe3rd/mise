@@ -2597,7 +2597,10 @@ MY_TOKEN = "secret"
         let def = aliases.get("mygitlab").expect("mygitlab alias not found");
         let opts = def.opts();
 
-        assert_eq!(opts.get("api_url"), Some("https://gitlab.mycompany.com/api/v4"));
+        assert_eq!(
+            opts.get("api_url"),
+            Some("https://gitlab.mycompany.com/api/v4")
+        );
         assert_eq!(
             opts.os,
             Some(vec!["linux".to_string(), "macos".to_string()]),
