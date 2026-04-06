@@ -901,6 +901,34 @@ pub fn parse_url_replacements(input: &str) -> Result<IndexMap<String, String>, s
     serde_json::from_str(input)
 }
 
+/// Parse path list using platform-specific separator (`:` on Unix, `;` on Windows)
+/// 
+/// On Windows, paths are separated by semicolons (`;`) to avoid ambiguity with drive letters (e.g., `C:\path`).
+/// On Unix, paths are separated by colons (`:`) following standard PATH conventions.
+///
+/// Note: This converts paths to strings using to_string_lossy(), which may replace
+/// invalid UTF-8 sequences with replacement characters. This is acceptable since:
+/// 1. Environment variables are already strings
+/// 2. Most systems use UTF-8 paths
+/// 3. The alternative would be to not support the FromStr trait required by confique
+pub fn list_by_path_sep<T, C>(input: &str) -> Result<C, <T as FromStr>::Err>
+where
+    T: FromStr,
+    C: FromIterator<T>,
+{
+    // Use platform-specific separator based on target OS
+    #[cfg(windows)]
+    const SEP: char = ';';
+    #[cfg(not(windows))]
+    const SEP: char = ':';
+    
+    input
+        .split(SEP)
+        .filter(|s| !s.is_empty())
+        .map(|s| T::from_str(s))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

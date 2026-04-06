@@ -265,12 +265,16 @@ if `MISE_CEILING_PATHS="/home/user"`, then `/home/user/mise.toml` is
 
 This follows the same semantics as Git's `GIT_CEILING_DIRECTORIES`.
 
+When setting this via environment variable, paths are separated according to
+platform conventions for the PATH environment variable. On most Unix platforms,
+the separator is `:` and on Windows it is `;`.
+
 This is an early-init setting: it must be set in `.miserc.toml`, environment
 variables, or CLI flags. Setting it in `mise.toml` will have no effect because
 config file discovery has already occurred by the time `mise.toml` is read.
 """
 env = "MISE_CEILING_PATHS"
-parse_env = "list_by_colon"
+parse_env = "list_by_path_sep"
 rc = true
 rust_type = "BTreeSet<PathBuf>"
 type = "ListPath"
@@ -922,12 +926,16 @@ description = "This is a list of config paths that mise will ignore."
 docs = """
 This is a list of config paths that mise will ignore.
 
+When setting this via environment variable, paths are separated according to
+platform conventions for the PATH environment variable. On most Unix platforms,
+the separator is `:` and on Windows it is `;`.
+
 This is an early-init setting: it must be set in `.miserc.toml`, environment
 variables, or CLI flags. Setting it in `mise.toml` will have no effect because
 config file discovery has already occurred by the time `mise.toml` is read.
 """
 env = "MISE_IGNORED_CONFIG_PATHS"
-parse_env = "list_by_colon"
+parse_env = "list_by_path_sep"
 rc = true
 rust_type = "BTreeSet<PathBuf>"
 type = "ListPath"
@@ -1891,8 +1899,15 @@ type = "Path"
 [task.disable_paths]
 default = []
 description = "Paths that mise will not look for tasks in."
+docs = """
+Paths that mise will not look for tasks in.
+
+When setting this via environment variable, paths are separated according to
+platform conventions for the PATH environment variable. On most Unix platforms,
+the separator is `:` and on Windows it is `;`.
+"""
 env = "MISE_TASK_DISABLE_PATHS"
-parse_env = "list_by_colon"
+parse_env = "list_by_path_sep"
 rust_type = "BTreeSet<PathBuf>"
 type = "ListPath"
 
@@ -2151,8 +2166,15 @@ type = "Bool"
 [trusted_config_paths]
 default = []
 description = "This is a list of config paths that mise will automatically mark as trusted."
+docs = """
+This is a list of config paths that mise will automatically mark as trusted.
+
+When setting this via environment variable, paths are separated according to
+platform conventions for the PATH environment variable. On most Unix platforms,
+the separator is `:` and on Windows it is `;`.
+"""
 env = "MISE_TRUSTED_CONFIG_PATHS"
-parse_env = "list_by_colon"
+parse_env = "list_by_path_sep"
 rust_type = "BTreeSet<PathBuf>"
 type = "ListPath"
 
