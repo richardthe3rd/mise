@@ -1110,8 +1110,7 @@ mod tests {
     #[test]
     #[cfg(windows)]
     fn test_list_by_os_path_separator_multiple_windows() {
-        let result: Vec<PathBuf> =
-            list_by_os_path_separator(r"C:\foo;D:\bar").unwrap();
+        let result: Vec<PathBuf> = list_by_os_path_separator(r"C:\foo;D:\bar").unwrap();
         assert_eq!(
             result,
             vec![PathBuf::from(r"C:\foo"), PathBuf::from(r"D:\bar")]
@@ -1125,9 +1124,12 @@ mod tests {
         #[cfg(not(windows))]
         let (input, a, b) = ("/foo:/bar", PathBuf::from("/foo"), PathBuf::from("/bar"));
         #[cfg(windows)]
-        let (input, a, b) = (r"C:\foo;D:\bar", PathBuf::from(r"C:\foo"), PathBuf::from(r"D:\bar"));
-        let result: std::collections::BTreeSet<PathBuf> =
-            list_by_os_path_separator(input).unwrap();
+        let (input, a, b) = (
+            r"C:\foo;D:\bar",
+            PathBuf::from(r"C:\foo"),
+            PathBuf::from(r"D:\bar"),
+        );
+        let result: std::collections::BTreeSet<PathBuf> = list_by_os_path_separator(input).unwrap();
         assert_eq!(result, [a, b].into_iter().collect());
     }
 }

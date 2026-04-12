@@ -32,10 +32,21 @@ PROJECT = "c"
         Set-Location $script:OriginalDir
         Remove-Item -Path $script:TestRoot -Recurse -Force -ErrorAction Ignore
         Remove-Item Env:MISE_TRUSTED_CONFIG_PATHS -ErrorAction Ignore
+        Remove-Item Env:MISE_PARANOID -ErrorAction Ignore
     }
 
     AfterEach {
         Remove-Item Env:MISE_TRUSTED_CONFIG_PATHS -ErrorAction Ignore
+        Remove-Item Env:MISE_PARANOID -ErrorAction Ignore
+    }
+
+    BeforeEach {
+        # MISE_PARANOID=1 forces hash-based trust checking, which prevents
+        # ci_info::is_ci() from auto-trusting all configs in CI. Without this,
+        # the "not trusted" test cases would pass in CI because CI auto-trusts
+        # everything. The MISE_TRUSTED_CONFIG_PATHS path check fires before the
+        # paranoid hash check, so positive trust tests still work correctly.
+        $env:MISE_PARANOID = "1"
     }
 
     It 'trusts a single path set via env var' {
