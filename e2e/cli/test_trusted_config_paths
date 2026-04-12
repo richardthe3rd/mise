@@ -1,13 +1,7 @@
 #!/usr/bin/env bash
 
-# Test MISE_TRUSTED_CONFIG_PATHS with multiple colon-separated paths on Linux.
-# On Unix, split_paths uses ':' as the separator. This test verifies that
-# multiple absolute paths in the env var are all recognized as trusted.
-
-# Ensure no inherited trusted paths
 export MISE_TRUSTED_CONFIG_PATHS=""
 
-# Create two project directories with config files
 mkdir -p project_a project_b project_c
 
 cat <<EOF >project_a/.mise.toml
@@ -27,46 +21,20 @@ EOF
 
 DIR_A="$(cd project_a && pwd)"
 DIR_B="$(cd project_b && pwd)"
-DIR_C="$(cd project_c && pwd)"
 
-# Single trusted path
-export MISE_TRUSTED_CONFIG_PATHS="$DIR_A"
-output=$(cd "$DIR_A" && mise env 2>&1)
-if ! echo "$output" | grep -q "PROJECT=a"; then
-    echo "FAIL: single trusted path not recognized"
-    echo "Output: $output"
-    exit 1
-fi
-echo "PASS: single trusted path works"
+# Single trusted path: config in DIR_A is loaded
+cd project_a
+assert_contains "MISE_TRUSTED_CONFIG_PATHS=$DIR_A mise env" "PROJECT=a"
 
-# Two paths separated by ':' (Unix OS path separator)
-export MISE_TRUSTED_CONFIG_PATHS="$DIR_A:$DIR_B"
-output=$(cd "$DIR_A" && mise env 2>&1)
-if ! echo "$output" | grep -q "PROJECT=a"; then
-    echo "FAIL: first of two trusted paths not recognized"
-    echo "Output: $output"
-    exit 1
-fi
-output=$(cd "$DIR_B" && mise env 2>&1)
-if ! echo "$output" | grep -q "PROJECT=b"; then
-    echo "FAIL: second of two trusted paths not recognized"
-    echo "Output: $output"
-    exit 1
-fi
-echo "PASS: multiple colon-separated trusted paths work"
+# Multiple colon-separated paths: both configs are loaded
+assert_contains "MISE_TRUSTED_CONFIG_PATHS=$DIR_A:$DIR_B mise env" "PROJECT=a"
+cd ../project_b
+assert_contains "MISE_TRUSTED_CONFIG_PATHS=$DIR_A:$DIR_B mise env" "PROJECT=b"
 
-# Path NOT in the list should not be trusted
-export MISE_TRUSTED_CONFIG_PATHS="$DIR_A"
-output=$(cd "$DIR_C" && MISE_YES=0 mise env 2>&1 || true)
-if echo "$output" | grep -q "PROJECT=c"; then
-    echo "FAIL: untrusted path was treated as trusted"
-    echo "Output: $output"
-    exit 1
-fi
-if ! echo "$output" | grep -qi "trust"; then
-    echo "FAIL: expected a trust-related error message, got: $output"
-    exit 1
-fi
-echo "PASS: path not in list is not trusted"
-
-echo "All MISE_TRUSTED_CONFIG_PATHS tests passed"
+# Path NOT in the list should not be trusted.
+# MISE_PARANOID=1 is required: in CI, ci_info::is_ci() causes is_trusted() to
+# return true for all configs. The paranoid check fires before the CI bypass,
+# so MISE_PARANOID=1 enables hash-based trust checking that correctly blocks
+# configs not in MISE_TRUSTED_CONFIG_PATHS.
+cd ../project_c
+assert_fail_contains "MISE_TRUSTED_CONFIG_PATHS=$DIR_A MISE_PARANOID=1 mise env" "trust"
