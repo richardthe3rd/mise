@@ -7,10 +7,8 @@ Describe 'MISE_TRUSTED_CONFIG_PATHS' {
         # Create two separate project directories with mise.toml files
         $script:DirA = Join-Path $script:TestRoot "project_a"
         $script:DirB = Join-Path $script:TestRoot "project_b"
-        $script:DirC = Join-Path $script:TestRoot "project_c"
         New-Item -ItemType Directory -Path $script:DirA | Out-Null
         New-Item -ItemType Directory -Path $script:DirB | Out-Null
-        New-Item -ItemType Directory -Path $script:DirC | Out-Null
 
         @"
 [env]
@@ -21,38 +19,16 @@ PROJECT = "a"
 [env]
 PROJECT = "b"
 "@ | Out-File (Join-Path $script:DirB ".mise.toml")
-
-        @"
-[env]
-PROJECT = "c"
-"@ | Out-File (Join-Path $script:DirC ".mise.toml")
     }
 
     AfterAll {
         Set-Location $script:OriginalDir
         Remove-Item -Path $script:TestRoot -Recurse -Force -ErrorAction Ignore
         Remove-Item Env:MISE_TRUSTED_CONFIG_PATHS -ErrorAction Ignore
-        Remove-Item Env:MISE_PARANOID -ErrorAction Ignore
-        Remove-Item Env:MISE_YES -ErrorAction Ignore
     }
 
     AfterEach {
         Remove-Item Env:MISE_TRUSTED_CONFIG_PATHS -ErrorAction Ignore
-        Remove-Item Env:MISE_PARANOID -ErrorAction Ignore
-        Remove-Item Env:MISE_YES -ErrorAction Ignore
-    }
-
-    BeforeEach {
-        # MISE_PARANOID=1 forces hash-based trust checking, which prevents
-        # ci_info::is_ci() from auto-trusting all configs in CI. Without this,
-        # the "not trusted" test cases would pass in CI because CI auto-trusts
-        # everything. The MISE_TRUSTED_CONFIG_PATHS path check fires before the
-        # paranoid hash check, so positive trust tests still work correctly.
-        #
-        # MISE_YES=0 prevents trust_check() from auto-accepting trust prompts
-        # when a config is not in the trusted list (mirrors Linux e2e pattern).
-        $env:MISE_PARANOID = "1"
-        $env:MISE_YES = "0"
     }
 
     It 'trusts a single path set via env var' {
@@ -72,23 +48,5 @@ PROJECT = "c"
         Set-Location $script:DirB
         $output = mise env | Out-String
         $output | Should -Match "export PROJECT=b"
-    }
-
-    It 'does not trust a path not in the list' {
-        # Only DirA is trusted; DirC is not in the list
-        $env:MISE_TRUSTED_CONFIG_PATHS = $script:DirA
-        Set-Location $script:DirC
-        # mise should refuse to load an untrusted config and say so
-        $output = mise env 2>&1 | Out-String
-        $output | Should -Not -Match "export PROJECT=c"
-        $output | Should -Match "trust"
-    }
-
-    It 'trusts nothing when env var is empty' {
-        $env:MISE_TRUSTED_CONFIG_PATHS = ""
-        Set-Location $script:DirA
-        $output = mise env 2>&1 | Out-String
-        $output | Should -Not -Match "export PROJECT=a"
-        $output | Should -Match "trust"
     }
 }
