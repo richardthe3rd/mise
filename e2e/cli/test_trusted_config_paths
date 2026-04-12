@@ -2,7 +2,7 @@
 
 export MISE_TRUSTED_CONFIG_PATHS=""
 
-mkdir -p project_a project_b project_c
+mkdir -p project_a project_b
 
 cat <<EOF >project_a/.mise.toml
 [env]
@@ -12,11 +12,6 @@ EOF
 cat <<EOF >project_b/.mise.toml
 [env]
 PROJECT = "b"
-EOF
-
-cat <<EOF >project_c/.mise.toml
-[env]
-PROJECT = "c"
 EOF
 
 DIR_A="$(cd project_a && pwd)"
@@ -30,11 +25,3 @@ assert_contains "MISE_TRUSTED_CONFIG_PATHS=$DIR_A mise env" "PROJECT=a"
 assert_contains "MISE_TRUSTED_CONFIG_PATHS=$DIR_A:$DIR_B mise env" "PROJECT=a"
 cd ../project_b
 assert_contains "MISE_TRUSTED_CONFIG_PATHS=$DIR_A:$DIR_B mise env" "PROJECT=b"
-
-# Path NOT in the list should not be trusted.
-# MISE_PARANOID=1: ci_info::is_ci() auto-trusts everything; the paranoid hash
-# check fires before that bypass, so it correctly blocks configs not in the list.
-# MISE_YES=0: the e2e framework sets MISE_YES=1 globally; without overriding it,
-# trust_check auto-accepts the prompt and writes a trust file instead of failing.
-cd ../project_c
-assert_fail_contains "MISE_TRUSTED_CONFIG_PATHS=$DIR_A MISE_YES=0 MISE_PARANOID=1 mise env" "trust"

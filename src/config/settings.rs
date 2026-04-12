@@ -1129,7 +1129,7 @@ mod tests {
             PathBuf::from(r"C:\foo"),
             PathBuf::from(r"D:\bar"),
         );
-        let result: std::collections::BTreeSet<PathBuf> = list_by_os_path_separator(input).unwrap();
+        let result: BTreeSet<PathBuf> = list_by_os_path_separator(input).unwrap();
         assert_eq!(result, [a, b].into_iter().collect());
     }
 }
