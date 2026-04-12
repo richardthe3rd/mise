@@ -33,11 +33,13 @@ PROJECT = "c"
         Remove-Item -Path $script:TestRoot -Recurse -Force -ErrorAction Ignore
         Remove-Item Env:MISE_TRUSTED_CONFIG_PATHS -ErrorAction Ignore
         Remove-Item Env:MISE_PARANOID -ErrorAction Ignore
+        Remove-Item Env:MISE_YES -ErrorAction Ignore
     }
 
     AfterEach {
         Remove-Item Env:MISE_TRUSTED_CONFIG_PATHS -ErrorAction Ignore
         Remove-Item Env:MISE_PARANOID -ErrorAction Ignore
+        Remove-Item Env:MISE_YES -ErrorAction Ignore
     }
 
     BeforeEach {
@@ -46,7 +48,11 @@ PROJECT = "c"
         # the "not trusted" test cases would pass in CI because CI auto-trusts
         # everything. The MISE_TRUSTED_CONFIG_PATHS path check fires before the
         # paranoid hash check, so positive trust tests still work correctly.
+        #
+        # MISE_YES=0 prevents trust_check() from auto-accepting trust prompts
+        # when a config is not in the trusted list (mirrors Linux e2e pattern).
         $env:MISE_PARANOID = "1"
+        $env:MISE_YES = "0"
     }
 
     It 'trusts a single path set via env var' {
