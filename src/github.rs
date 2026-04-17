@@ -1,7 +1,7 @@
 use crate::cache::{CacheManager, CacheManagerBuilder};
 use crate::config::Settings;
-use crate::file::path_env_without_shims;
-use crate::{dirs, duration, env};
+use crate::tokens;
+use crate::{dirs, env};
 use eyre::Result;
 use heck::ToKebabCase;
 use reqwest::IntoUrl;
@@ -83,6 +83,8 @@ static TAGS_CACHE: Lazy<RwLock<CacheGroup<Vec<String>>>> = Lazy::new(Default::de
 
 pub static API_URL: &str = "https://api.github.com";
 
+pub static API_PATH: &str = "/api/v3";
+
 async fn get_tags_cache(key: &str) -> RwLockReadGuard<'_, CacheGroup<Vec<String>>> {
     TAGS_CACHE
         .write()
@@ -90,7 +92,7 @@ async fn get_tags_cache(key: &str) -> RwLockReadGuard<'_, CacheGroup<Vec<String>
         .entry(key.to_string())
         .or_insert_with(|| {
             CacheManagerBuilder::new(cache_dir().join(format!("{key}-tags.msgpack.z")))
-                .with_fresh_duration(Some(duration::DAILY))
+                .with_fresh_duration(Settings::get().fetch_remote_versions_cache())
                 .build()
         });
     TAGS_CACHE.read().await
@@ -103,7 +105,7 @@ async fn get_releases_cache(key: &str) -> RwLockReadGuard<'_, CacheGroup<Vec<Git
         .entry(key.to_string())
         .or_insert_with(|| {
             CacheManagerBuilder::new(cache_dir().join(format!("{key}-releases.msgpack.z")))
-                .with_fresh_duration(Some(duration::DAILY))
+                .with_fresh_duration(Settings::get().fetch_remote_versions_cache())
                 .build()
         });
     RELEASES_CACHE.read().await
@@ -116,7 +118,7 @@ async fn get_release_cache<'a>(key: &str) -> RwLockReadGuard<'a, CacheGroup<Gith
         .entry(key.to_string())
         .or_insert_with(|| {
             CacheManagerBuilder::new(cache_dir().join(format!("{key}.msgpack.z")))
-                .with_fresh_duration(Some(duration::DAILY))
+                .with_fresh_duration(Settings::get().fetch_remote_versions_cache())
                 .build()
         });
     RELEASE_CACHE.read().await
@@ -367,13 +369,26 @@ impl fmt::Display for TokenSource {
 }
 
 /// Normalize a URL hostname to the canonical host used for token lookups.
-/// Maps "api.github.com" and "*.githubusercontent.com" to "github.com".
+/// Maps "api.github.com" and supported "*.githubusercontent.com" hosts to "github.com".
 fn canonical_host(host: Option<&str>) -> Option<&str> {
     match host {
         Some("api.github.com") => Some("github.com"),
-        Some(h) if h.ends_with(".githubusercontent.com") => Some("github.com"),
+        Some(h) if is_githubusercontent_auth_host(h) => Some("github.com"),
         other => other,
     }
+}
+
+pub fn is_githubusercontent_auth_host(host: &str) -> bool {
+    host.ends_with(".githubusercontent.com") && !is_github_release_asset_host(host)
+}
+
+fn is_github_release_asset_host(host: &str) -> bool {
+    matches!(
+        host,
+        "objects.githubusercontent.com"
+            | "objects-origin.githubusercontent.com"
+            | "release-assets.githubusercontent.com"
+    )
 }
 
 /// Resolve the GitHub token for the given hostname, returning the token and its source.
@@ -388,10 +403,13 @@ fn canonical_host(host: Option<&str>) -> Option<&str> {
 pub fn resolve_token(host: &str) -> Option<(String, TokenSource)> {
     let settings = Settings::get();
 
-    let is_ghcom = host == "github.com"
-        || host == "api.github.com"
-        || host.ends_with(".githubusercontent.com");
-    let lookup_host = if host == "api.github.com" || host.ends_with(".githubusercontent.com") {
+    if is_github_release_asset_host(host) {
+        return None;
+    }
+
+    let is_ghcom =
+        host == "github.com" || host == "api.github.com" || is_githubusercontent_auth_host(host);
+    let lookup_host = if host == "api.github.com" || is_githubusercontent_auth_host(host) {
         "github.com"
     } else {
         host
@@ -419,7 +437,8 @@ pub fn resolve_token(host: &str) -> Option<(String, TokenSource)> {
     // 3. credential_command
     let credential_command = &settings.github.credential_command;
     if !credential_command.is_empty()
-        && let Some(token) = get_credential_command_token(credential_command, lookup_host)
+        && let Some(token) =
+            tokens::get_credential_command_token("github", credential_command, lookup_host)
     {
         return Some((token, TokenSource::CredentialCommand));
     }
@@ -438,12 +457,23 @@ pub fn resolve_token(host: &str) -> Option<(String, TokenSource)> {
 
     // 6. git credential fill
     if settings.github.use_git_credentials
-        && let Some(token) = get_git_credential_token(lookup_host)
+        && let Some(token) = tokens::get_git_credential_token("github", lookup_host)
     {
         return Some((token, TokenSource::GitCredential));
     }
 
     None
+}
+
+/// Resolve the GitHub token from a full API base URL (e.g., "https://api.github.com").
+/// Extracts the hostname and delegates to [`resolve_token`].
+pub fn resolve_token_for_api_url(api_url: &str) -> Option<String> {
+    let parsed = url::Url::parse(api_url).ok();
+    let host = parsed
+        .as_ref()
+        .and_then(|u| u.host_str())
+        .unwrap_or("api.github.com");
+    resolve_token(host).map(|(t, _)| t)
 }
 
 pub fn get_headers<U: IntoUrl>(url: U) -> HeaderMap {
@@ -488,42 +518,13 @@ pub fn is_gh_host(host: &str) -> bool {
 static MISE_GITHUB_TOKENS: Lazy<HashMap<String, String>> =
     Lazy::new(|| read_mise_github_tokens().unwrap_or_default());
 
-#[derive(Deserialize)]
-struct MiseGithubTokensFile {
-    tokens: Option<HashMap<String, MiseGithubTokenEntry>>,
-}
-
-#[derive(Deserialize)]
-struct MiseGithubTokenEntry {
-    token: Option<String>,
-}
-
+#[cfg(test)]
 fn parse_github_tokens(contents: &str) -> Option<HashMap<String, String>> {
-    let file: MiseGithubTokensFile = toml::from_str(contents).ok()?;
-    Some(
-        file.tokens?
-            .into_iter()
-            .filter_map(|(host, entry)| entry.token.map(|t| (host, t)))
-            .collect(),
-    )
+    tokens::parse_tokens_toml(contents)
 }
 
 fn read_mise_github_tokens() -> Option<HashMap<String, String>> {
-    let path = env::MISE_CONFIG_DIR.join("github_tokens.toml");
-    let contents = match std::fs::read_to_string(&path) {
-        Ok(c) => c,
-        Err(e) => {
-            trace!("github_tokens.toml not readable at {}: {e}", path.display());
-            return None;
-        }
-    };
-    match parse_github_tokens(&contents) {
-        Some(tokens) => Some(tokens),
-        None => {
-            debug!("failed to parse github_tokens.toml at {}", path.display());
-            None
-        }
-    }
+    tokens::read_tokens_toml("github_tokens.toml", "github_tokens.toml")
 }
 
 // ── gh CLI hosts.yml ────────────────────────────────────────────────
@@ -590,119 +591,42 @@ struct GhHostEntry {
     oauth_token: Option<String>,
 }
 
-// ── credential_command ──────────────────────────────────────────────
-
-/// Cache for tokens obtained from `credential_command`.
-/// Maps hostname to the token (or None if the command failed).
-static CREDENTIAL_COMMAND_CACHE: Lazy<std::sync::Mutex<HashMap<String, Option<String>>>> =
-    Lazy::new(Default::default);
-
-/// Get a GitHub token by running the user's `credential_command` setting.
-/// The host is passed as `$1` to the command. Results are cached per host.
-fn get_credential_command_token(cmd: &str, host: &str) -> Option<String> {
-    let mut cache = CREDENTIAL_COMMAND_CACHE
-        .lock()
-        .expect("CREDENTIAL_COMMAND_CACHE mutex poisoned");
-    if let Some(token) = cache.get(host) {
-        return token.clone();
-    }
-    let path_without_shims = path_env_without_shims();
-    let result = std::process::Command::new("sh")
-        .arg("-c")
-        .arg(cmd)
-        .arg("mise-credential-helper") // $0
-        .arg(host) // $1
-        .env("PATH", &path_without_shims)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .output()
-        .ok()
-        .and_then(|output| {
-            if !output.status.success() {
-                if let Ok(err) = String::from_utf8(output.stderr)
-                    && !err.trim().is_empty()
-                {
-                    debug!("credential_command stderr: {}", err.trim());
-                }
-                return None;
-            }
-            String::from_utf8(output.stdout)
-                .ok()
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-        });
-    trace!(
-        "credential_command for {host}: {}",
-        if result.is_some() {
-            "found"
-        } else {
-            "not found"
-        }
-    );
-    cache.insert(host.to_string(), result.clone());
-    result
-}
-
-// ── git credential fill ─────────────────────────────────────────────
-
-/// Cache for tokens obtained from `git credential fill`.
-/// Maps hostname to the token (or None if the command failed / git is not installed).
-static GIT_CREDENTIAL_CACHE: Lazy<std::sync::Mutex<HashMap<String, Option<String>>>> =
-    Lazy::new(Default::default);
-
-/// Get a GitHub token for `host` by running `git credential fill`.
-/// Results are cached per hostname so the subprocess is only spawned once.
-// TODO: make async and use tokio::sync::Mutex to avoid blocking the runtime
-// thread during subprocess I/O. Requires making resolve_token and get_headers async.
-fn get_git_credential_token(host: &str) -> Option<String> {
-    let mut cache = GIT_CREDENTIAL_CACHE
-        .lock()
-        .expect("GIT_CREDENTIAL_CACHE mutex poisoned");
-    if let Some(token) = cache.get(host) {
-        return token.clone();
-    }
-    let path_without_shims = path_env_without_shims();
-    let input = format!("protocol=https\nhost={host}\n\n");
-    let result = std::process::Command::new("git")
-        .args(["credential", "fill"])
-        .env("PATH", &path_without_shims)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .ok()
-        .and_then(|mut child| {
-            use std::io::Write;
-            child.stdin.take()?.write_all(input.as_bytes()).ok()?;
-            let output = child.wait_with_output().ok()?;
-            if !output.status.success() {
-                return None;
-            }
-            String::from_utf8(output.stdout)
-                .ok()?
-                .lines()
-                .find_map(|line| line.strip_prefix("password="))
-                .map(|p| p.to_string())
-                .filter(|s| !s.is_empty())
-        });
-    trace!(
-        "git credential fill for {host}: {}",
-        if result.is_some() {
-            "found"
-        } else {
-            "not found"
-        }
-    );
-    cache.insert(host.to_string(), result.clone());
-    result
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn with_github_token<F, R>(test_fn: F) -> R
+    where
+        F: FnOnce() -> R,
+    {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let orig_mise = std::env::var("MISE_GITHUB_TOKEN").ok();
+        let orig_api = std::env::var("GITHUB_API_TOKEN").ok();
+        let orig_gh = std::env::var("GITHUB_TOKEN").ok();
+
+        env::remove_var("MISE_GITHUB_TOKEN");
+        env::remove_var("GITHUB_API_TOKEN");
+        env::set_var("GITHUB_TOKEN", "ghp_test");
+
+        let result = test_fn();
+
+        match orig_mise {
+            Some(v) => env::set_var("MISE_GITHUB_TOKEN", v),
+            None => env::remove_var("MISE_GITHUB_TOKEN"),
+        }
+        match orig_api {
+            Some(v) => env::set_var("GITHUB_API_TOKEN", v),
+            None => env::remove_var("GITHUB_API_TOKEN"),
+        }
+        match orig_gh {
+            Some(v) => env::set_var("GITHUB_TOKEN", v),
+            None => env::remove_var("GITHUB_TOKEN"),
+        }
+
+        result
+    }
 
     #[test]
     fn test_parse_github_tokens() {
@@ -738,6 +662,41 @@ something_else = "value"
 "#;
         let result = parse_github_tokens(toml).unwrap();
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_githubusercontent_auth_hosts_exclude_release_assets() {
+        assert!(is_githubusercontent_auth_host("raw.githubusercontent.com"));
+        assert!(!is_githubusercontent_auth_host(
+            "objects.githubusercontent.com"
+        ));
+        assert!(!is_githubusercontent_auth_host(
+            "objects-origin.githubusercontent.com"
+        ));
+        assert!(!is_githubusercontent_auth_host(
+            "release-assets.githubusercontent.com"
+        ));
+    }
+
+    #[test]
+    fn test_release_asset_hosts_do_not_use_github_token() {
+        with_github_token(|| {
+            for host in [
+                "objects.githubusercontent.com",
+                "objects-origin.githubusercontent.com",
+                "release-assets.githubusercontent.com",
+            ] {
+                let headers =
+                    get_headers(format!("https://{host}/github-production-release-asset"));
+                assert!(
+                    !headers.contains_key(reqwest::header::AUTHORIZATION),
+                    "{host} should not use GitHub auth"
+                );
+            }
+
+            let headers = get_headers("https://raw.githubusercontent.com/owner/repo/main/file.txt");
+            assert!(headers.contains_key(reqwest::header::AUTHORIZATION));
+        });
     }
 
     fn make_release(tag: &str) -> GithubRelease {

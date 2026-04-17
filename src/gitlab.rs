@@ -1,16 +1,20 @@
+use crate::config::Settings;
+use crate::tokens;
 use eyre::Result;
 use heck::ToKebabCase;
 use reqwest::IntoUrl;
 use reqwest::header::{HeaderMap, HeaderValue};
 use serde_derive::{Deserialize, Serialize};
+use serde_yaml::Value;
 use std::collections::HashMap;
+use std::fmt;
 use std::path::PathBuf;
 use std::sync::LazyLock as Lazy;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use xx::regex;
 
 use crate::cache::{CacheManager, CacheManagerBuilder};
-use crate::{dirs, duration, env};
+use crate::{dirs, env};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitlabRelease {
@@ -57,6 +61,8 @@ static TAGS_CACHE: Lazy<RwLock<CacheGroup<Vec<String>>>> = Lazy::new(Default::de
 
 pub static API_URL: &str = "https://gitlab.com/api/v4";
 
+pub static API_PATH: &str = "/api/v4";
+
 async fn get_tags_cache(key: &str) -> RwLockReadGuard<'_, CacheGroup<Vec<String>>> {
     TAGS_CACHE
         .write()
@@ -64,7 +70,7 @@ async fn get_tags_cache(key: &str) -> RwLockReadGuard<'_, CacheGroup<Vec<String>
         .entry(key.to_string())
         .or_insert_with(|| {
             CacheManagerBuilder::new(cache_dir().join(format!("{key}-tags.msgpack.z")))
-                .with_fresh_duration(Some(duration::DAILY))
+                .with_fresh_duration(Settings::get().fetch_remote_versions_cache())
                 .build()
         });
     TAGS_CACHE.read().await
@@ -77,7 +83,7 @@ async fn get_releases_cache(key: &str) -> RwLockReadGuard<'_, CacheGroup<Vec<Git
         .entry(key.to_string())
         .or_insert_with(|| {
             CacheManagerBuilder::new(cache_dir().join(format!("{key}-releases.msgpack.z")))
-                .with_fresh_duration(Some(duration::DAILY))
+                .with_fresh_duration(Settings::get().fetch_remote_versions_cache())
                 .build()
         });
     RELEASES_CACHE.read().await
@@ -90,7 +96,7 @@ async fn get_release_cache(key: &str) -> RwLockReadGuard<'_, CacheGroup<GitlabRe
         .entry(key.to_string())
         .or_insert_with(|| {
             CacheManagerBuilder::new(cache_dir().join(format!("{key}.msgpack.z")))
-                .with_fresh_duration(Some(duration::DAILY))
+                .with_fresh_duration(Settings::get().fetch_remote_versions_cache())
                 .build()
         });
     RELEASE_CACHE.read().await
@@ -238,18 +244,343 @@ fn cache_dir() -> PathBuf {
 pub fn get_headers<U: IntoUrl>(url: U) -> HeaderMap {
     let mut headers = HeaderMap::new();
     let url = url.into_url().unwrap();
-    let mut set_headers = |token: &str| {
+    let lookup_host = url.host_str().unwrap_or("gitlab.com");
+
+    if let Some((token, _source)) = resolve_token(lookup_host) {
         headers.insert(
             reqwest::header::AUTHORIZATION,
             HeaderValue::from_str(format!("Bearer {token}").as_str()).unwrap(),
         );
-    };
-    if url.host_str() == Some("gitlab.com") {
-        if let Some(token) = env::GITLAB_TOKEN.as_ref() {
-            set_headers(token);
-        }
-    } else if let Some(token) = env::MISE_GITLAB_ENTERPRISE_TOKEN.as_ref() {
-        set_headers(token);
     }
+
     headers
+}
+
+/// The source from which a GitLab token was resolved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TokenSource {
+    EnvVar(&'static str),
+    TokensFile,
+    GlabCli,
+    CredentialCommand,
+    GitCredential,
+}
+
+impl fmt::Display for TokenSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TokenSource::EnvVar(name) => write!(f, "{name}"),
+            TokenSource::TokensFile => write!(f, "gitlab_tokens.toml"),
+            TokenSource::GlabCli => write!(f, "glab CLI (config.yml)"),
+            TokenSource::CredentialCommand => write!(f, "credential_command"),
+            TokenSource::GitCredential => write!(f, "git credential fill"),
+        }
+    }
+}
+
+/// Resolve the GitLab token for the given hostname.
+///
+/// Priority:
+/// 1. `MISE_GITLAB_ENTERPRISE_TOKEN` env var (non-gitlab.com only)
+/// 2. `MISE_GITLAB_TOKEN` / `GITLAB_TOKEN` env vars
+/// 3. `credential_command` (if set)
+/// 4. `gitlab_tokens.toml` (per-host)
+/// 5. glab CLI token (from `config.yml`)
+/// 6. `git credential fill` (if enabled)
+pub fn resolve_token(host: &str) -> Option<(String, TokenSource)> {
+    let settings = Settings::get();
+    let is_gitlab_com = host == "gitlab.com";
+
+    // 1. Enterprise token (non-gitlab.com only)
+    if !is_gitlab_com && let Some(token) = env::MISE_GITLAB_ENTERPRISE_TOKEN.as_deref() {
+        return Some((
+            token.to_string(),
+            TokenSource::EnvVar("MISE_GITLAB_ENTERPRISE_TOKEN"),
+        ));
+    }
+
+    // 2. Standard env vars
+    for var_name in &["MISE_GITLAB_TOKEN", "GITLAB_TOKEN"] {
+        if let Some(token) = std::env::var(var_name)
+            .ok()
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
+        {
+            return Some((token, TokenSource::EnvVar(var_name)));
+        }
+    }
+
+    // 3. credential_command
+    let credential_command = &settings.gitlab.credential_command;
+    if !credential_command.is_empty()
+        && let Some(token) =
+            tokens::get_credential_command_token("gitlab", credential_command, host)
+    {
+        return Some((token, TokenSource::CredentialCommand));
+    }
+
+    // 4. gitlab_tokens.toml
+    if let Some(token) = MISE_GITLAB_TOKENS.get(host) {
+        return Some((token.clone(), TokenSource::TokensFile));
+    }
+
+    // 5. glab CLI config.yml
+    if settings.gitlab.glab_cli_tokens
+        && let Some(token) = GLAB_HOSTS.get(host)
+    {
+        return Some((token.clone(), TokenSource::GlabCli));
+    }
+
+    // 6. git credential fill
+    if settings.gitlab.use_git_credentials
+        && let Some(token) = tokens::get_git_credential_token("gitlab", host)
+    {
+        return Some((token, TokenSource::GitCredential));
+    }
+
+    None
+}
+
+/// Returns true if the given hostname has a token available from a non-env-var source.
+pub fn is_gitlab_host(host: &str) -> bool {
+    MISE_GITLAB_TOKENS.contains_key(host)
+        || (Settings::get().gitlab.glab_cli_tokens && GLAB_HOSTS.contains_key(host))
+}
+
+// ── gitlab_tokens.toml ─────────────────────────────────────────────
+
+static MISE_GITLAB_TOKENS: Lazy<HashMap<String, String>> = Lazy::new(|| {
+    tokens::read_tokens_toml("gitlab_tokens.toml", "gitlab_tokens.toml").unwrap_or_default()
+});
+
+// ── glab CLI config.yml ────────────────────────────────────────────
+
+static GLAB_HOSTS: Lazy<HashMap<String, String>> =
+    Lazy::new(|| read_glab_hosts().unwrap_or_default());
+
+fn glab_config_path() -> Option<PathBuf> {
+    if let Ok(dir) = std::env::var("GLAB_CONFIG_DIR") {
+        return Some(PathBuf::from(dir).join("config.yml"));
+    }
+
+    let xdg_path = env::XDG_CONFIG_HOME.join("glab-cli/config.yml");
+    if xdg_path.exists() {
+        return Some(xdg_path);
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let macos_path = dirs::HOME.join("Library/Application Support/glab-cli/config.yml");
+        if macos_path.exists() {
+            return Some(macos_path);
+        }
+    }
+
+    Some(xdg_path)
+}
+
+fn read_glab_hosts() -> Option<HashMap<String, String>> {
+    let path = glab_config_path()?;
+    let contents = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(e) => {
+            trace!("glab config.yml not readable at {}: {e}", path.display());
+            return None;
+        }
+    };
+    warn_glab_expired_tokens(&contents);
+    match tokens::yaml_hosts_to_tokens(&contents) {
+        Some(tokens) => Some(tokens),
+        None => {
+            debug!("failed to parse glab config.yml at {}", path.display());
+            None
+        }
+    }
+}
+
+/// Warn if any glab OAuth2 tokens are expired.
+///
+/// glab stores `oauth2_expiry_date` alongside `oauth2_refresh_token`. Current glab
+/// versions write RFC3339; older versions used RFC822. We only check RFC3339 since
+/// that is the correct format going forward--old tokens will simply not trigger the
+/// warning. mise cannot refresh OAuth2 tokens itself, so we warn the user to run a
+/// glab command (e.g. `glab api user`) which will trigger a silent token refresh.
+fn warn_glab_expired_tokens(contents: &str) {
+    for (host, expiry_str) in find_expired_glab_tokens(contents) {
+        warn!(
+            "glab OAuth2 token for {host} expired at {expiry_str}. Run a glab command (e.g. `glab api user`) to refresh it."
+        );
+    }
+}
+
+/// Returns `(host, expiry_str)` pairs for every glab host whose OAuth2 token is expired.
+fn find_expired_glab_tokens(contents: &str) -> Vec<(String, String)> {
+    let Ok(yaml) = serde_yaml::from_str::<Value>(contents) else {
+        return vec![];
+    };
+    let Some(hosts) = yaml.get("hosts").and_then(Value::as_mapping) else {
+        return vec![];
+    };
+
+    let mut expired = vec![];
+    let now = chrono::Utc::now();
+    for (k, entry) in hosts {
+        let Some(host) = k.as_str() else { continue };
+        if entry.get("oauth2_refresh_token").is_none() {
+            continue;
+        }
+        let Some(expiry_str) = entry.get("oauth2_expiry_date").and_then(Value::as_str) else {
+            continue;
+        };
+        let Ok(expiry_date) = chrono::DateTime::parse_from_rfc3339(expiry_str) else {
+            continue;
+        };
+        if expiry_date < now {
+            expired.push((host.to_string(), expiry_str.to_string()));
+        }
+    }
+    expired
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_gitlab_tokens() {
+        let toml = r#"
+[tokens."gitlab.com"]
+token = "glpat_abc123"
+
+[tokens."gitlab.mycompany.com"]
+token = "glpat_def456"
+"#;
+        let result = tokens::parse_tokens_toml(toml).unwrap();
+        assert_eq!(result.get("gitlab.com").unwrap(), "glpat_abc123");
+        assert_eq!(result.get("gitlab.mycompany.com").unwrap(), "glpat_def456");
+    }
+
+    #[test]
+    fn test_parse_gitlab_tokens_empty() {
+        assert!(tokens::parse_tokens_toml("").is_none());
+    }
+
+    #[test]
+    fn test_parse_gitlab_tokens_empty_tokens() {
+        let toml = "[tokens]\n";
+        let result = tokens::parse_tokens_toml(toml).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_parse_gitlab_tokens_missing_token_field() {
+        let toml = r#"
+[tokens."gitlab.com"]
+something_else = "value"
+"#;
+        let result = tokens::parse_tokens_toml(toml).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_find_expired_glab_tokens_expired() {
+        let yaml = r#"
+hosts:
+  gitlab.com:
+    oauth_token: gloas-abc123
+    oauth2_refresh_token: refresh_token
+    oauth2_expiry_date: "2023-03-13T15:47:00Z"
+"#;
+        let expired = find_expired_glab_tokens(yaml);
+        assert_eq!(expired.len(), 1);
+        assert_eq!(expired[0].0, "gitlab.com");
+        assert_eq!(expired[0].1, "2023-03-13T15:47:00Z");
+    }
+
+    #[test]
+    fn test_find_expired_glab_tokens_not_expired() {
+        let yaml = r#"
+hosts:
+  gitlab.com:
+    oauth_token: gloas-abc123
+    oauth2_refresh_token: refresh_token
+    oauth2_expiry_date: "2050-01-01T00:00:00Z"
+"#;
+        let expired = find_expired_glab_tokens(yaml);
+        assert!(expired.is_empty());
+    }
+
+    #[test]
+    fn test_find_expired_glab_tokens_no_expiry_field() {
+        // PATs have no expiry date--should not be flagged
+        let yaml = r#"
+hosts:
+  gitlab.com:
+    token: glpat-abc123
+"#;
+        let expired = find_expired_glab_tokens(yaml);
+        assert!(expired.is_empty());
+    }
+
+    #[test]
+    fn test_find_expired_glab_tokens_multiple_hosts() {
+        let yaml = r#"
+hosts:
+  gitlab.com:
+    oauth_token: gloas-abc123
+    oauth2_refresh_token: refresh1
+    oauth2_expiry_date: "2023-03-13T15:47:00Z"
+  gitlab.mycompany.com:
+    oauth_token: gloas-def456
+    oauth2_refresh_token: refresh2
+    oauth2_expiry_date: "2050-01-01T00:00:00Z"
+"#;
+        let expired = find_expired_glab_tokens(yaml);
+        assert_eq!(expired.len(), 1);
+        assert_eq!(expired[0].0, "gitlab.com");
+    }
+
+    #[test]
+    fn test_find_expired_glab_tokens_old_format_skipped() {
+        // Old RFC822 format is not parsed--no false positives
+        let yaml = r#"
+hosts:
+  gitlab.com:
+    oauth_token: gloas-abc123
+    oauth2_expiry_date: "13 Mar 23 15:47 GMT"
+"#;
+        let expired = find_expired_glab_tokens(yaml);
+        assert!(expired.is_empty());
+    }
+
+    #[test]
+    fn test_find_expired_glab_tokens_invalid_date() {
+        let yaml = r#"
+hosts:
+  gitlab.com:
+    oauth_token: gloas-abc123
+    oauth2_expiry_date: "not-a-date"
+"#;
+        let expired = find_expired_glab_tokens(yaml);
+        assert!(expired.is_empty());
+    }
+
+    #[test]
+    fn test_find_expired_glab_tokens_no_refresh_token_skipped() {
+        // No oauth2_refresh_token means reauthentication is needed, not a refresh—don't warn.
+        let yaml = r#"
+hosts:
+  gitlab.com:
+    oauth_token: gloas-abc123
+    oauth2_expiry_date: "2023-03-13T15:47:00Z"
+"#;
+        let expired = find_expired_glab_tokens(yaml);
+        assert!(expired.is_empty());
+    }
+
+    #[test]
+    fn test_find_expired_glab_tokens_empty() {
+        assert!(find_expired_glab_tokens("").is_empty());
+        assert!(find_expired_glab_tokens("hosts: {}").is_empty());
+    }
 }
