@@ -41,6 +41,10 @@ MISE_TEST_SYSTEM_VAR = "from_system"
         $fakeProgData = Join-Path $TestDrive "fake_pgdata2"
         $fakeMiseDir  = Join-Path $fakeProgData "mise"
         New-Item -ItemType Directory -Path $fakeMiseDir -Force | Out-Null
+        # Grant Users full write access so the security check fails even on elevated CI runners.
+        # On windows-latest, new directories are owned by BUILTIN\Administrators; granting
+        # Users write access ensures users_no_write=false → the directory is treated as untrusted.
+        icacls $fakeMiseDir /grant "Users:(OI)(CI)F" | Out-Null
         @"
 [env]
 MISE_SHOULD_NOT_APPEAR = "yes"

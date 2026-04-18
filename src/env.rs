@@ -1107,17 +1107,25 @@ mod windows_tests {
     }
 
     #[test]
-    fn test_user_created_temp_dir_is_not_admin_controlled() {
-        // A dir created by the current non-admin user is owned by that user, writable by Users
+    fn test_dir_with_user_write_access_is_not_admin_controlled() {
+        // Explicitly grant BUILTIN\Users write access so this test is reliable regardless of
+        // whether the test process is elevated (on windows-latest CI, new directories are
+        // owned by BUILTIN\Administrators, so only the write-access check distinguishes
+        // trusted from untrusted).
         let tmp = std::env::temp_dir().join("mise_admin_check_test_xyz");
         let _ = std::fs::create_dir_all(&tmp);
+        let granted = std::process::Command::new("icacls")
+            .args([tmp.to_str().unwrap(), "/grant", "Users:(OI)(CI)F"])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
         let result = windows_dir_admin_controlled(&tmp);
         let _ = std::fs::remove_dir_all(&tmp);
-        // Only valid when tests run without admin rights (normal in CI)
+        assert!(granted, "icacls grant should succeed so the test is meaningful");
         assert_eq!(
             result.unwrap_or(true),
             false,
-            "User-created temp dir should not be admin-controlled"
+            "Dir with Users write access should not be admin-controlled"
         );
     }
 }
