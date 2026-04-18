@@ -1096,13 +1096,37 @@ mod windows_tests {
     }
 
     #[test]
-    fn test_system32_is_admin_controlled() {
-        // C:\Windows\System32 is always owned by TrustedInstaller or SYSTEM and not user-writable
-        let result = windows_dir_admin_controlled(Path::new(r"C:\Windows\System32"));
+    fn test_admin_owned_dir_without_user_write_is_trusted() {
+        // Create a temp dir and configure it as admin-controlled:
+        // - Remove inherited ACEs (/inheritance:r)
+        // - Grant Administrators and SYSTEM full control
+        // - Grant Users read-and-execute only (no write)
+        // On windows-latest CI (elevated runner), new directories are owned by
+        // BUILTIN\Administrators, satisfying the owner check. Removing Users
+        // write access ensures users_no_write=true → function returns Ok(true).
+        let tmp = std::env::temp_dir().join("mise_admin_positive_test_xyz");
+        let _ = std::fs::create_dir_all(&tmp);
+        let icacls_ok = std::process::Command::new("icacls")
+            .args([
+                tmp.to_str().unwrap(),
+                "/inheritance:r",
+                "/grant",
+                "Administrators:(OI)(CI)F",
+                "/grant",
+                "SYSTEM:(OI)(CI)F",
+                "/grant",
+                "Users:(OI)(CI)RX",
+            ])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        let result = windows_dir_admin_controlled(&tmp);
+        let _ = std::fs::remove_dir_all(&tmp);
+        assert!(icacls_ok, "icacls setup should succeed so the test is meaningful");
         assert_eq!(
             result.unwrap_or(false),
             true,
-            "System32 should be admin-controlled"
+            "Admin-owned dir with read-only Users should be admin-controlled"
         );
     }
 
