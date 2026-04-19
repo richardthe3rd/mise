@@ -220,13 +220,30 @@ impl Install {
 
     fn install_opts(&self) -> Result<InstallOptions> {
         #[cfg(windows)]
-        if self.system && !matches!(crate::env::WINDOWS_SYSTEM_DIR_STATE.0, crate::env::WindowsDirTrust::Trusted) {
-            warn!(
-                "mise: system install directory {} is not trusted (failed ownership/write check). \
-                 Tools installed there will not be loaded by mise. \
-                 Run as Administrator to fix ownership. Proceeding with installation.",
-                env::MISE_SYSTEM_INSTALLS_DIR.display()
-            );
+        if self.system {
+            use crate::env::{WINDOWS_SYSTEM_DIR_STATE, WindowsDirTrust};
+            let (trust, _) = &*WINDOWS_SYSTEM_DIR_STATE;
+            match trust {
+                WindowsDirTrust::Insecure => {
+                    warn!(
+                        "mise: system install directory {} is not owned by Administrators/SYSTEM \
+                         and/or is writable by standard users. \
+                         Tools installed there will not be loaded by mise. \
+                         Run as Administrator to fix ownership. Proceeding with installation.",
+                        env::MISE_SYSTEM_INSTALLS_DIR.display()
+                    );
+                }
+                WindowsDirTrust::CheckFailed => {
+                    warn!(
+                        "mise: could not verify ownership of system install directory {} \
+                         (Windows API error). \
+                         Tools installed there will not be loaded by mise. \
+                         Set MISE_SYSTEM_DATA_DIR to override. Proceeding with installation.",
+                        env::MISE_SYSTEM_INSTALLS_DIR.display()
+                    );
+                }
+                WindowsDirTrust::Trusted => {}
+            }
         }
         let install_dir = if self.system {
             Some(env::MISE_SYSTEM_INSTALLS_DIR.clone())
