@@ -841,7 +841,8 @@ pub(crate) enum WindowsDirTrust {
     CheckFailed(PathBuf),
 }
 
-/// Checks whether `path` is safe to use as a system config/data directory:
+/// Checks whether `path` is safe to use as a system config/data directory and returns the
+/// trust state. Emits a `warn!` if the check fails so callers need no extra logging.
 ///
 /// 1. The owner must be `BUILTIN\Administrators` or `NT AUTHORITY\SYSTEM`.
 /// 2. None of `BUILTIN\Users`, `Authenticated Users`, `Everyone`, or `INTERACTIVE`
@@ -854,10 +855,8 @@ pub(crate) enum WindowsDirTrust {
 /// `BUILTIN\Administrators`) will be rejected as `Insecure` even if it is otherwise safe. A
 /// proper system installer sets `BUILTIN\Administrators` as owner via the elevated UAC token.
 /// This matches the approach taken by git's CVE-2022-24765 fix.
-///
-/// Returns `Ok(true)` if admin-controlled, `Ok(false)` if not, `Err` if the check failed.
 #[cfg(windows)]
-fn windows_dir_admin_controlled(path: &Path) -> Result<bool> {
+fn windows_dir_admin_controlled(path: PathBuf) -> WindowsDirTrust {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Foundation::{ERROR_SUCCESS, LocalFree};
     use windows_sys::Win32::Security::{
@@ -899,11 +898,14 @@ fn windows_dir_admin_controlled(path: &Path) -> Result<bool> {
         if !sd.is_null() {
             unsafe { LocalFree(sd) };
         }
-        return Err(eyre::eyre!(
-            "GetNamedSecurityInfoW failed for {}: error {}",
+        warn!(
+            "mise: could not verify security descriptor of system directory {}: \
+             GetNamedSecurityInfoW error {}. \
+             Ignoring as a precaution. Set MISE_SYSTEM_CONFIG_DIR to override.",
             path.display(),
             err
-        ));
+        );
+        return WindowsDirTrust::CheckFailed(path);
     }
 
     // Check 1: owner must be Administrators or SYSTEM
@@ -929,7 +931,12 @@ fn windows_dir_admin_controlled(path: &Path) -> Result<bool> {
     // A null DACL means everyone has full access — treat as untrusted immediately.
     if dacl.is_null() {
         unsafe { LocalFree(sd) };
-        return Ok(false);
+        warn!(
+            "mise: ignoring {} as the system directory: null DACL grants full access to everyone. \
+             Set MISE_SYSTEM_CONFIG_DIR to override.",
+            path.display()
+        );
+        return WindowsDirTrust::Insecure(path);
     }
     // Check all four non-privileged principals. On domain-joined machines `Authenticated Users`
     // (S-1-5-11) and `BUILTIN\Users` (S-1-5-32-545) are distinct; an ACL that grants write only
@@ -967,7 +974,18 @@ fn windows_dir_admin_controlled(path: &Path) -> Result<bool> {
     });
 
     unsafe { LocalFree(sd) };
-    Ok(owner_privileged && all_principals_safe)
+    if owner_privileged && all_principals_safe {
+        WindowsDirTrust::Trusted
+    } else {
+        warn!(
+            "mise: ignoring {} as the system directory: it must be owned by \
+             BUILTIN\\Administrators or NT AUTHORITY\\SYSTEM, and none of \
+             BUILTIN\\Users, Authenticated Users, Everyone, or INTERACTIVE may \
+             have write access. Set MISE_SYSTEM_CONFIG_DIR to override.",
+            path.display()
+        );
+        WindowsDirTrust::Insecure(path)
+    }
 }
 
 /// Security state for the default Windows system directory (`%PROGRAMDATA%\mise`).
@@ -975,40 +993,19 @@ fn windows_dir_admin_controlled(path: &Path) -> Result<bool> {
 /// for use in warning messages; `Trusted` carries no path (check passed or was skipped).
 #[cfg(windows)]
 pub(crate) static WINDOWS_SYSTEM_DIR_STATE: Lazy<WindowsDirTrust> = Lazy::new(|| {
-    use WindowsDirTrust::*;
     // If any system-dir env var is explicitly set, the user opted in — skip the check.
     if var_path("MISE_SYSTEM_CONFIG_DIR")
         .or_else(|| var_path("MISE_SYSTEM_DIR"))
         .or_else(|| var_path("MISE_SYSTEM_DATA_DIR"))
         .is_some()
     {
-        return Trusted;
+        return WindowsDirTrust::Trusted;
     }
     let dir = windows_programdata_mise();
     if !dir.is_dir() {
-        return Trusted; // Directory doesn't exist — no threat yet
+        return WindowsDirTrust::Trusted; // Directory doesn't exist — no threat yet
     }
-    match windows_dir_admin_controlled(&dir) {
-        Ok(true) => Trusted,
-        Ok(false) => {
-            warn!(
-                "mise: ignoring {} as the system directory: it must be owned by \
-                 BUILTIN\\Administrators or NT AUTHORITY\\SYSTEM, and none of \
-                 BUILTIN\\Users, Authenticated Users, Everyone, or INTERACTIVE may \
-                 have write access. Set MISE_SYSTEM_CONFIG_DIR to override.",
-                dir.display()
-            );
-            Insecure(dir)
-        }
-        Err(err) => {
-            warn!(
-                "mise: could not verify security descriptor of system directory {}: {err:#}. \
-                 Ignoring as a precaution. Set MISE_SYSTEM_CONFIG_DIR to override.",
-                dir.display()
-            );
-            CheckFailed(dir)
-        }
-    }
+    windows_dir_admin_controlled(dir)
 });
 
 /// Returns the system config directory if it should be trusted, or `None` if it should be
@@ -1147,10 +1144,10 @@ mod windows_tests {
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false);
-        let result = windows_dir_admin_controlled(tmp.path());
+        let result = windows_dir_admin_controlled(tmp.path().to_path_buf());
         assert!(icacls_ok, "icacls setup should succeed so the test is meaningful");
         assert!(
-            result.expect("security check should not fail"),
+            matches!(result, WindowsDirTrust::Trusted),
             "Dir with read-only Users and admin owner should be trusted"
         );
     }
@@ -1164,7 +1161,7 @@ mod windows_tests {
             .unwrap_or(false);
         assert!(granted, "icacls /grant {icacls_grant} should succeed so the test is meaningful");
         assert!(
-            !windows_dir_admin_controlled(tmp.path()).expect("security check should not fail"),
+            !matches!(windows_dir_admin_controlled(tmp.path().to_path_buf()), WindowsDirTrust::Trusted),
             "Dir with {icacls_grant} write grant should not be admin-controlled"
         );
     }
