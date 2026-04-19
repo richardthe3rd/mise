@@ -829,15 +829,16 @@ fn windows_programdata_mise() -> PathBuf {
 }
 
 /// Trust state for the default Windows system directory (`%PROGRAMDATA%\mise`).
+/// `Insecure` and `CheckFailed` carry the checked path so callers can display it in warnings.
 #[cfg(windows)]
 #[derive(Debug)]
 pub(crate) enum WindowsDirTrust {
     /// Directory is safe to use (admin-controlled, or env var override, or doesn't exist yet).
     Trusted,
     /// Directory exists but failed the ownership or write-access check.
-    Insecure,
+    Insecure(PathBuf),
     /// The security check itself failed with a Windows API error.
-    CheckFailed,
+    CheckFailed(PathBuf),
 }
 
 /// Checks whether `path` is safe to use as a system config/data directory:
@@ -912,16 +913,12 @@ fn windows_dir_admin_controlled(path: &Path) -> Result<bool> {
     };
 
     // Check 2: none of the standard-user principals may have write access.
-    // GENERIC_WRITE is never stored directly in ACEs; check specific write rights only.
-    // FILE_WRITE_ATTRIBUTES/EA are included for completeness — attribute-write alone can't
-    // inject content but is still a write right.
-    // NOTE: GetEffectiveRightsFromAclW does not consider all group memberships and can be
-    // unreliable with inherited ACEs on some Windows versions (see MSDN). For our threat
-    // model (locally-created directories) this is acceptable; AccessCheck with a restricted
-    // token would be more robust.
-    // FILE_ADD_FILE (= FILE_WRITE_DATA for dirs, 0x0002) and FILE_ADD_SUBDIRECTORY
-    // (= FILE_APPEND_DATA for dirs, 0x0004) are the directory-specific names for those bits.
-    // GENERIC_WRITE is never stored directly in ACEs so is not checked here.
+    // FILE_ADD_FILE/FILE_ADD_SUBDIRECTORY are the directory-specific names for FILE_WRITE_DATA
+    // (0x0002) and FILE_APPEND_DATA (0x0004). GENERIC_WRITE is never stored in ACEs directly.
+    // NOTE: GetEffectiveRightsFromAclW only evaluates explicit ACEs for the given SID; it does
+    // not expand group memberships or consider inherited ACEs reliably (see MSDN). For our threat
+    // model (locally-created directories) this is acceptable; AccessCheck with a restricted token
+    // would be more robust.
     let write_mask: u32 = FILE_ADD_FILE
         | FILE_ADD_SUBDIRECTORY
         | FILE_WRITE_EA
@@ -938,18 +935,13 @@ fn windows_dir_admin_controlled(path: &Path) -> Result<bool> {
     // (S-1-5-11) and `BUILTIN\Users` (S-1-5-32-545) are distinct; an ACL that grants write only
     // to `Authenticated Users` would pass a BUILTIN\Users-only check. `Everyone` and `INTERACTIVE`
     // cover the remaining well-known non-privileged groups.
-    // NOTE: GetEffectiveRightsFromAclW only evaluates explicit ACEs for the given SID; it does
-    // not expand group memberships or consider inherited ACEs reliably (see MSDN). For our threat
-    // model (locally-created directories) this is acceptable; AccessCheck with a restricted token
-    // would be more robust.
     let standard_principals: &[u32] = &[
         WinBuiltinUsersSid,
         WinAuthenticatedUserSid,
         WinWorldSid,
         WinInteractiveSid,
     ];
-    let mut users_no_write = true;
-    for &well_known in standard_principals {
+    let all_principals_safe = standard_principals.iter().all(|&well_known| {
         let mut sid_buf = [0u8; 68]; // SECURITY_MAX_SID_SIZE
         let mut sid_size = sid_buf.len() as u32;
         let sid_ok = unsafe {
@@ -961,8 +953,7 @@ fn windows_dir_admin_controlled(path: &Path) -> Result<bool> {
             ) != 0
         };
         if !sid_ok {
-            users_no_write = false; // Could not construct SID — treat as untrusted
-            break;
+            return false;
         }
         let mut trustee: TRUSTEE_W = unsafe { std::mem::zeroed() };
         trustee.TrusteeForm = TRUSTEE_IS_SID;
@@ -972,24 +963,18 @@ fn windows_dir_admin_controlled(path: &Path) -> Result<bool> {
         let err2 = unsafe {
             GetEffectiveRightsFromAclW(dacl as *const ACL, &trustee as *const TRUSTEE_W, &mut access_rights)
         };
-        if err2 != ERROR_SUCCESS || (access_rights & write_mask) != 0 {
-            users_no_write = false;
-            break;
-        }
-    }
+        err2 == ERROR_SUCCESS && (access_rights & write_mask) == 0
+    });
 
     unsafe { LocalFree(sd) };
-    Ok(owner_privileged && users_no_write)
+    Ok(owner_privileged && all_principals_safe)
 }
 
-/// Security state for the default Windows system directory (`%PROGRAMDATA%\mise`), together with
-/// the directory path that was checked at initialization time.
-///
-/// Computed once (lazily); the captured path avoids re-reading `PROGRAMDATA` later.
-/// The stored path is only meaningful for the `Insecure` and `CheckFailed` variants —
-/// doctor uses it for the warning message. In the `Trusted` case it is an empty `PathBuf`.
+/// Security state for the default Windows system directory (`%PROGRAMDATA%\mise`).
+/// Computed once (lazily). `Insecure` and `CheckFailed` variants carry the checked path
+/// for use in warning messages; `Trusted` carries no path (check passed or was skipped).
 #[cfg(windows)]
-pub(crate) static WINDOWS_SYSTEM_DIR_STATE: Lazy<(WindowsDirTrust, PathBuf)> = Lazy::new(|| {
+pub(crate) static WINDOWS_SYSTEM_DIR_STATE: Lazy<WindowsDirTrust> = Lazy::new(|| {
     use WindowsDirTrust::*;
     // If any system-dir env var is explicitly set, the user opted in — skip the check.
     if var_path("MISE_SYSTEM_CONFIG_DIR")
@@ -997,14 +982,14 @@ pub(crate) static WINDOWS_SYSTEM_DIR_STATE: Lazy<(WindowsDirTrust, PathBuf)> = L
         .or_else(|| var_path("MISE_SYSTEM_DATA_DIR"))
         .is_some()
     {
-        return (Trusted, PathBuf::new());
+        return Trusted;
     }
     let dir = windows_programdata_mise();
     if !dir.is_dir() {
-        return (Trusted, PathBuf::new()); // Directory doesn't exist — no threat yet
+        return Trusted; // Directory doesn't exist — no threat yet
     }
     match windows_dir_admin_controlled(&dir) {
-        Ok(true) => (Trusted, PathBuf::new()),
+        Ok(true) => Trusted,
         Ok(false) => {
             warn!(
                 "mise: ignoring {} as the system directory: it must be owned by \
@@ -1013,7 +998,7 @@ pub(crate) static WINDOWS_SYSTEM_DIR_STATE: Lazy<(WindowsDirTrust, PathBuf)> = L
                  have write access. Set MISE_SYSTEM_CONFIG_DIR to override.",
                 dir.display()
             );
-            (Insecure, dir)
+            Insecure(dir)
         }
         Err(err) => {
             warn!(
@@ -1021,7 +1006,7 @@ pub(crate) static WINDOWS_SYSTEM_DIR_STATE: Lazy<(WindowsDirTrust, PathBuf)> = L
                  Ignoring as a precaution. Set MISE_SYSTEM_CONFIG_DIR to override.",
                 dir.display()
             );
-            (CheckFailed, dir)
+            CheckFailed(dir)
         }
     }
 });
@@ -1032,7 +1017,7 @@ pub(crate) static WINDOWS_SYSTEM_DIR_STATE: Lazy<(WindowsDirTrust, PathBuf)> = L
 /// from the system config directory.
 pub fn system_config_dir() -> Option<&'static Path> {
     #[cfg(windows)]
-    if !matches!(WINDOWS_SYSTEM_DIR_STATE.0, WindowsDirTrust::Trusted) {
+    if !matches!(*WINDOWS_SYSTEM_DIR_STATE, WindowsDirTrust::Trusted) {
         return None;
     }
     Some(&MISE_SYSTEM_CONFIG_DIR)
@@ -1044,7 +1029,7 @@ pub fn system_config_dir() -> Option<&'static Path> {
 /// from the system data directory.
 pub fn system_data_dir() -> Option<&'static Path> {
     #[cfg(windows)]
-    if !matches!(WINDOWS_SYSTEM_DIR_STATE.0, WindowsDirTrust::Trusted) {
+    if !matches!(*WINDOWS_SYSTEM_DIR_STATE, WindowsDirTrust::Trusted) {
         return None;
     }
     Some(&MISE_SYSTEM_DATA_DIR)
@@ -1171,83 +1156,38 @@ mod windows_tests {
         );
     }
 
-    #[test]
-    fn test_dir_with_builtin_users_write_is_not_admin_controlled() {
+    fn assert_principal_write_is_untrusted(icacls_grant: &str) {
         let tmp = tempdir().unwrap();
         let granted = std::process::Command::new("icacls")
-            .args([tmp.path().to_str().unwrap(), "/grant", "Users:(OI)(CI)F"])
+            .args([tmp.path().to_str().unwrap(), "/grant", icacls_grant])
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false);
-        let result = windows_dir_admin_controlled(tmp.path());
-        assert!(granted, "icacls grant should succeed so the test is meaningful");
+        assert!(granted, "icacls /grant {icacls_grant} should succeed so the test is meaningful");
         assert_eq!(
-            result.unwrap_or(true),
+            windows_dir_admin_controlled(tmp.path()).unwrap_or(true),
             false,
-            "Dir with BUILTIN\\Users write access should not be admin-controlled"
+            "Dir with {icacls_grant} write grant should not be admin-controlled"
         );
+    }
+
+    #[test]
+    fn test_dir_with_builtin_users_write_is_not_admin_controlled() {
+        assert_principal_write_is_untrusted("Users:(OI)(CI)F");
     }
 
     #[test]
     fn test_dir_with_authenticated_users_write_is_not_admin_controlled() {
-        let tmp = tempdir().unwrap();
-        let granted = std::process::Command::new("icacls")
-            .args([
-                tmp.path().to_str().unwrap(),
-                "/grant",
-                "Authenticated Users:(OI)(CI)W",
-            ])
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
-        let result = windows_dir_admin_controlled(tmp.path());
-        assert!(granted, "icacls grant should succeed so the test is meaningful");
-        assert_eq!(
-            result.unwrap_or(true),
-            false,
-            "Dir with Authenticated Users write access should not be admin-controlled"
-        );
+        assert_principal_write_is_untrusted("Authenticated Users:(OI)(CI)W");
     }
 
     #[test]
     fn test_dir_with_everyone_write_is_not_admin_controlled() {
-        let tmp = tempdir().unwrap();
-        let granted = std::process::Command::new("icacls")
-            .args([
-                tmp.path().to_str().unwrap(),
-                "/grant",
-                "Everyone:(OI)(CI)W",
-            ])
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
-        let result = windows_dir_admin_controlled(tmp.path());
-        assert!(granted, "icacls grant should succeed so the test is meaningful");
-        assert_eq!(
-            result.unwrap_or(true),
-            false,
-            "Dir with Everyone write access should not be admin-controlled"
-        );
+        assert_principal_write_is_untrusted("Everyone:(OI)(CI)W");
     }
 
     #[test]
     fn test_dir_with_interactive_write_is_not_admin_controlled() {
-        let tmp = tempdir().unwrap();
-        let granted = std::process::Command::new("icacls")
-            .args([
-                tmp.path().to_str().unwrap(),
-                "/grant",
-                "INTERACTIVE:(OI)(CI)W",
-            ])
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
-        let result = windows_dir_admin_controlled(tmp.path());
-        assert!(granted, "icacls grant should succeed so the test is meaningful");
-        assert_eq!(
-            result.unwrap_or(true),
-            false,
-            "Dir with INTERACTIVE write access should not be admin-controlled"
-        );
+        assert_principal_write_is_untrusted("INTERACTIVE:(OI)(CI)W");
     }
 }

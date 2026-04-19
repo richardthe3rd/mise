@@ -222,9 +222,8 @@ impl Install {
         #[cfg(windows)]
         if self.system {
             use crate::env::{WINDOWS_SYSTEM_DIR_STATE, WindowsDirTrust};
-            let (trust, _) = &*WINDOWS_SYSTEM_DIR_STATE;
-            match trust {
-                WindowsDirTrust::Insecure => {
+            match &*WINDOWS_SYSTEM_DIR_STATE {
+                WindowsDirTrust::Insecure(_) => {
                     warn!(
                         "mise: system install directory {} is not admin-controlled \
                          (ownership or write-access check failed). \
@@ -234,7 +233,7 @@ impl Install {
                         env::MISE_SYSTEM_INSTALLS_DIR.display()
                     );
                 }
-                WindowsDirTrust::CheckFailed => {
+                WindowsDirTrust::CheckFailed(_) => {
                     warn!(
                         "mise: could not verify write-access on system install directory {} \
                          (Windows API error). \

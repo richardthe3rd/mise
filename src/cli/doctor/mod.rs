@@ -389,12 +389,11 @@ impl Doctor {
     #[cfg(windows)]
     fn check_windows_system_dir(&mut self) {
         use crate::env::{WINDOWS_SYSTEM_DIR_STATE, WindowsDirTrust};
-        let (trust, dir) = &*WINDOWS_SYSTEM_DIR_STATE;
-        match trust {
+        match &*WINDOWS_SYSTEM_DIR_STATE {
             WindowsDirTrust::Trusted => {}
-            WindowsDirTrust::Insecure => {
+            WindowsDirTrust::Insecure(dir) => {
                 self.warnings.push(format!(
-                    "System directory {} is not admin-controlled (ownership or write-access check failed).\n\
+                    "System directory {d} is not admin-controlled (ownership or write-access check failed).\n\
                      The owner must be Administrators or SYSTEM, and standard users must not have write access.\n\
                      Mise is ignoring it to prevent privilege escalation.\n\
                      Fix (run as Administrator):\n  \
@@ -402,16 +401,15 @@ impl Doctor {
                      icacls \"{d}\" /inheritance:r /grant \"Administrators:(OI)(CI)F\" \
                      /grant \"SYSTEM:(OI)(CI)F\" /grant \"Users:(OI)(CI)RX\"\n\
                      Override: set MISE_SYSTEM_CONFIG_DIR to use a trusted path.",
-                    dir.display(),
                     d = dir.display(),
                 ));
             }
-            WindowsDirTrust::CheckFailed => {
+            WindowsDirTrust::CheckFailed(dir) => {
                 self.warnings.push(format!(
-                    "Could not verify write-access on system directory {} (Windows API error).\n\
+                    "Could not verify write-access on system directory {d} (Windows API error).\n\
                      Mise is ignoring it as a precaution.\n\
                      Override: set MISE_SYSTEM_CONFIG_DIR to use a trusted path.",
-                    dir.display(),
+                    d = dir.display(),
                 ));
             }
         }
