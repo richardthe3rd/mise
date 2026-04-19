@@ -276,10 +276,11 @@ where
             // relative to tool paths since both are "mise-added".
             // The child process still inherits the full unmodified PATH.
             let user_shims = &*crate::dirs::SHIMS;
-            let sys_shims = crate::env::system_data_dir()
-                .map(|d| d.join("shims"))
-                .unwrap_or_default();
-            let is_shims_dir = |p: &std::path::PathBuf| p == user_shims || p == &sys_shims;
+            let sys_shims: Option<std::path::PathBuf> =
+                crate::env::system_data_dir().map(|d| d.join("shims"));
+            let is_shims_dir = |p: &std::path::PathBuf| {
+                p == user_shims || sys_shims.as_ref().is_some_and(|s| p == s)
+            };
             let pristine: std::collections::HashSet<_> = crate::env::PATH.iter().collect();
             let all_paths: Vec<_> = std::env::split_paths(&OsString::from(path_val)).collect();
             // Mise-added paths first (preserving relative order)

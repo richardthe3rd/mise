@@ -220,7 +220,7 @@ impl Install {
 
     fn install_opts(&self) -> Result<InstallOptions> {
         #[cfg(windows)]
-        if self.system && !*crate::env::WINDOWS_SYSTEM_DIR_TRUSTED {
+        if self.system && !matches!(crate::env::WINDOWS_SYSTEM_DIR_STATE.0, crate::env::WindowsDirTrust::Trusted) {
             warn!(
                 "mise: system install directory {} is not trusted (failed ownership/write check). \
                  Tools installed there will not be loaded by mise. \

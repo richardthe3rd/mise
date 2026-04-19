@@ -812,17 +812,17 @@ pub fn set_current_dir<P: AsRef<Path>>(path: P) -> Result<()> {
     Ok(())
 }
 
-fn default_system_dir(unix_default: &'static str) -> PathBuf {
+fn default_system_dir(_unix_default: &'static str) -> PathBuf {
     #[cfg(windows)]
     { windows_programdata_mise() }
     #[cfg(not(windows))]
-    { PathBuf::from(unix_default) }
+    { PathBuf::from(_unix_default) }
 }
 
 /// Returns the default Windows system directory: `%PROGRAMDATA%\mise`.
 /// Used as the default for both `MISE_SYSTEM_CONFIG_DIR` and `MISE_SYSTEM_DATA_DIR` on Windows.
 #[cfg(windows)]
-pub(crate) fn windows_programdata_mise() -> PathBuf {
+fn windows_programdata_mise() -> PathBuf {
     var_path("PROGRAMDATA")
         .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"))
         .join("mise")
@@ -970,7 +970,7 @@ pub(crate) static WINDOWS_SYSTEM_DIR_STATE: Lazy<(WindowsDirTrust, PathBuf)> = L
         return (Trusted, PathBuf::new()); // Directory doesn't exist — no threat yet
     }
     match windows_dir_admin_controlled(&dir) {
-        Ok(true) => (Trusted, dir),
+        Ok(true) => (Trusted, PathBuf::new()),
         Ok(false) => {
             warn!(
                 "mise: ignoring {} as the system directory: it must be owned by \
@@ -990,13 +990,6 @@ pub(crate) static WINDOWS_SYSTEM_DIR_STATE: Lazy<(WindowsDirTrust, PathBuf)> = L
         }
     }
 });
-
-/// True when the default Windows system directory is safe to use. Delegates to
-/// `WINDOWS_SYSTEM_DIR_STATE`; prefer that when you also need the checked path or
-/// want to distinguish insecure vs API-error.
-#[cfg(windows)]
-pub(crate) static WINDOWS_SYSTEM_DIR_TRUSTED: Lazy<bool> =
-    Lazy::new(|| matches!(WINDOWS_SYSTEM_DIR_STATE.0, WindowsDirTrust::Trusted));
 
 /// Returns the system config directory if it should be trusted, or `None` if it should be
 /// skipped (Windows untrusted dir). On non-Windows this always returns `Some`.
