@@ -1164,8 +1164,8 @@ mod windows_tests {
             .unwrap_or(false);
         assert!(granted, "icacls /grant {icacls_grant} should succeed so the test is meaningful");
         assert!(
-            !matches!(windows_dir_admin_controlled(tmp.path().to_path_buf()), WindowsDirTrust::Trusted),
-            "Dir with {icacls_grant} write grant should not be admin-controlled"
+            matches!(windows_dir_admin_controlled(tmp.path().to_path_buf()), WindowsDirTrust::Insecure(_)),
+            "Dir with {icacls_grant} write grant should be detected as Insecure"
         );
     }
 
