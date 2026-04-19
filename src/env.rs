@@ -1117,11 +1117,14 @@ mod windows_tests {
     use tempfile::tempdir;
 
     #[test]
-    fn test_nonexistent_dir_returns_err() {
+    fn test_nonexistent_dir_returns_checkfailed() {
         let tmp = tempdir().unwrap();
         let missing = tmp.path().join("does_not_exist");
-        let result = windows_dir_admin_controlled(&missing);
-        assert!(result.is_err(), "non-existent path should return Err");
+        let result = windows_dir_admin_controlled(missing);
+        assert!(
+            matches!(result, WindowsDirTrust::CheckFailed(_)),
+            "non-existent path should return CheckFailed"
+        );
     }
 
     #[test]
