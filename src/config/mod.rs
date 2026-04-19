@@ -1282,7 +1282,9 @@ pub fn system_config_files() -> IndexSet<PathBuf> {
     if let Some(p) = &*env::MISE_SYSTEM_CONFIG_FILE {
         return vec![p.clone()].into_iter().collect();
     }
-    let config_files = config_files_from_dir(&dirs::SYSTEM_CONFIG);
+    let config_files = env::system_config_dir()
+        .map(config_files_from_dir)
+        .unwrap_or_default();
     *s = Some(config_files.clone());
     config_files
 }
@@ -1708,8 +1710,11 @@ fn default_task_includes() -> Vec<String> {
 }
 
 fn is_global_task_include_path(path: &Path) -> bool {
-    path.starts_with(dirs::CONFIG.join("tasks"))
-        || path.starts_with(dirs::SYSTEM_CONFIG.join("tasks"))
+    if path.starts_with(dirs::CONFIG.join("tasks")) {
+        return true;
+    }
+    env::system_config_dir()
+        .is_some_and(|d| path.starts_with(d.join("tasks")))
 }
 
 #[async_backtrace::framed]

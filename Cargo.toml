@@ -225,7 +225,13 @@ self_update = { version = "0.42", optional = true, default-features = false, fea
 ] }
 zipsign-api = "0.2"
 sevenz-rust = "0.6"
-winapi = { version = "0.3.9", features = ["consoleapi", "minwindef"] }
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",             # LocalFree, ERROR_SUCCESS, TRUE, FALSE
+  "Win32_Security",               # IsWellKnownSid, CreateWellKnownSid, PSID, ACL, SID type constants
+  "Win32_Security_Authorization", # GetNamedSecurityInfoW, GetEffectiveRightsFromAclW, TRUSTEE_W, SE_FILE_OBJECT
+  "Win32_Storage_FileSystem",     # FILE_WRITE_DATA/EA/ATTRIBUTES, FILE_ADD_FILE/SUBDIRECTORY, DELETE, WRITE_DAC/OWNER
+  "Win32_System_Console",         # SetConsoleCtrlHandler
+] }
 
 [build-dependencies]
 built = { version = "0.8", features = ["chrono"] }

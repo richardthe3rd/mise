@@ -196,10 +196,11 @@ fn find_miserc_files() -> Vec<PathBuf> {
     }
 
     // System: /etc/mise/miserc.toml (or MISE_SYSTEM_CONFIG_DIR)
-    let system_dir = env::MISE_SYSTEM_CONFIG_DIR.clone();
-    let system_path = system_dir.join("miserc.toml");
-    if system_path.is_file() {
-        files.push(system_path);
+    if let Some(system_dir) = env::system_config_dir() {
+        let system_path = system_dir.join("miserc.toml");
+        if system_path.is_file() {
+            files.push(system_path.to_path_buf());
+        }
     }
 
     files

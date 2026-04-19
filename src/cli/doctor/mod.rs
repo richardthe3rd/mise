@@ -121,6 +121,8 @@ impl Doctor {
         self.analyze_plugins();
         self.analyze_backend_mismatches();
         self.check_path_ordering(ts, &config).await;
+        #[cfg(windows)]
+        self.check_windows_system_dir();
         data.insert(
             "paths".into(),
             self.paths(ts)
@@ -384,6 +386,37 @@ impl Doctor {
         Ok(())
     }
 
+    #[cfg(windows)]
+    fn check_windows_system_dir(&mut self) {
+        use crate::env::{WINDOWS_SYSTEM_DIR_STATE, WindowsDirTrust};
+        let (trust, dir) = &*WINDOWS_SYSTEM_DIR_STATE;
+        match trust {
+            WindowsDirTrust::Trusted => {}
+            WindowsDirTrust::Insecure => {
+                self.warnings.push(format!(
+                    "System directory {} exists but is not owned by Administrators or SYSTEM \
+                     and/or is writable by standard users.\n\
+                     Mise is ignoring it to prevent privilege escalation.\n\
+                     Fix (run as Administrator):\n  \
+                     icacls \"{display}\" /setowner \"Administrators\" /T /C\n  \
+                     icacls \"{display}\" /inheritance:r /grant \"Administrators:(OI)(CI)F\" \
+                     /grant \"SYSTEM:(OI)(CI)F\" /grant \"Users:(OI)(CI)RX\"\n\
+                     Override: set MISE_SYSTEM_CONFIG_DIR to use a trusted path.",
+                    dir.display(),
+                    display = dir.display(),
+                ));
+            }
+            WindowsDirTrust::CheckFailed => {
+                self.warnings.push(format!(
+                    "Could not verify ownership of system directory {} (Windows API error).\n\
+                     Mise is ignoring it as a precaution.\n\
+                     Override: set MISE_SYSTEM_CONFIG_DIR to use a trusted path.",
+                    dir.display(),
+                ));
+            }
+        }
+    }
+
     async fn analyze_shims(&mut self, config: &Arc<Config>, toolset: &Toolset) {
         let mise_bin = file::which_no_shims("mise").unwrap_or(env::MISE_BIN.clone());
 
@@ -574,15 +607,17 @@ fn yn(b: bool) -> String {
 }
 
 fn mise_dirs() -> Vec<(String, &'static Path)> {
+    let sys_suffix = if crate::env::system_config_dir().is_some() { "" } else { " (untrusted — ignored)" };
     [
-        ("cache", &*dirs::CACHE),
-        ("config", &*dirs::CONFIG),
-        ("data", &*dirs::DATA),
-        ("shims", &*dirs::SHIMS),
-        ("state", &*dirs::STATE),
+        ("cache".to_string(), &*dirs::CACHE as &Path),
+        ("config".to_string(), &*dirs::CONFIG),
+        ("data".to_string(), &*dirs::DATA),
+        ("shims".to_string(), &*dirs::SHIMS),
+        ("state".to_string(), &*dirs::STATE),
+        (format!("system_config{sys_suffix}"), &*dirs::SYSTEM_CONFIG),
+        (format!("system_data{sys_suffix}"), &*dirs::SYSTEM_DATA),
     ]
-    .iter()
-    .map(|(k, v)| (k.to_string(), **v))
+    .into_iter()
     .collect()
 }
 

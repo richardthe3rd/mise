@@ -276,7 +276,9 @@ where
             // relative to tool paths since both are "mise-added".
             // The child process still inherits the full unmodified PATH.
             let user_shims = &*crate::dirs::SHIMS;
-            let sys_shims = crate::env::MISE_SYSTEM_DATA_DIR.join("shims");
+            let sys_shims = crate::env::system_data_dir()
+                .map(|d| d.join("shims"))
+                .unwrap_or_default();
             let is_shims_dir = |p: &std::path::PathBuf| p == user_shims || p == &sys_shims;
             let pristine: std::collections::HashSet<_> = crate::env::PATH.iter().collect();
             let all_paths: Vec<_> = std::env::split_paths(&OsString::from(path_val)).collect();
@@ -343,15 +345,17 @@ where
             .to_string_lossy()
             .to_lowercase()
             .replace('/', "\\");
-        let sys_shims_normalized = crate::env::MISE_SYSTEM_DATA_DIR
-            .join("shims")
-            .to_string_lossy()
-            .to_lowercase()
-            .replace('/', "\\");
+        let sys_shims_normalized: Option<String> = crate::env::system_data_dir().map(|d| {
+            d.join("shims")
+                .to_string_lossy()
+                .to_lowercase()
+                .replace('/', "\\")
+        });
         let is_shims = |p: &std::path::PathBuf| {
             let expanded = crate::file::replace_path(p);
             let normalized = expanded.to_string_lossy().to_lowercase().replace('/', "\\");
-            normalized == shims_normalized || normalized == sys_shims_normalized
+            normalized == shims_normalized
+                || sys_shims_normalized.as_deref().is_some_and(|s| normalized == s)
         };
         let pristine: std::collections::HashSet<_> = crate::env::PATH
             .iter()
@@ -431,8 +435,8 @@ where
 #[cfg(all(windows, not(test)))]
 mod win_exec {
     use eyre::{Result, eyre};
-    use winapi::shared::minwindef::{BOOL, DWORD, FALSE, TRUE};
-    use winapi::um::consoleapi::SetConsoleCtrlHandler;
+    use windows_sys::Win32::Foundation::{FALSE, TRUE};
+    use windows_sys::Win32::System::Console::SetConsoleCtrlHandler;
     // Windows way of creating a process is to just go ahead and pop a new process
     // with given program and args into existence. But in unix-land, it instead happens
     // in a two-step process where you first fork the process and then exec the new program,
@@ -441,7 +445,7 @@ mod win_exec {
     // to emulate the ctrl-c behavior by not handling it ourselves, and propagating it to
     // the child process to handle it instead.
     // This is the same way cargo does it in cargo run.
-    unsafe extern "system" fn ctrlc_handler(_: DWORD) -> BOOL {
+    unsafe extern "system" fn ctrlc_handler(_: u32) -> windows_sys::core::BOOL {
         // This is a no-op handler to prevent Ctrl-C from terminating the process.
         // It allows the child process to handle Ctrl-C instead.
         TRUE
