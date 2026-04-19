@@ -919,7 +919,7 @@ fn windows_dir_admin_controlled(path: &Path) -> Result<bool> {
     // not expand group memberships or consider inherited ACEs reliably (see MSDN). For our threat
     // model (locally-created directories) this is acceptable; AccessCheck with a restricted token
     // would be more robust.
-    let write_mask: u32 = FILE_ADD_FILE
+    const WRITE_MASK: u32 = FILE_ADD_FILE
         | FILE_ADD_SUBDIRECTORY
         | FILE_WRITE_EA
         | FILE_WRITE_ATTRIBUTES
@@ -963,7 +963,7 @@ fn windows_dir_admin_controlled(path: &Path) -> Result<bool> {
         let err2 = unsafe {
             GetEffectiveRightsFromAclW(dacl as *const ACL, &trustee as *const TRUSTEE_W, &mut access_rights)
         };
-        err2 == ERROR_SUCCESS && (access_rights & write_mask) == 0
+        err2 == ERROR_SUCCESS && (access_rights & WRITE_MASK) == 0
     });
 
     unsafe { LocalFree(sd) };
@@ -1149,9 +1149,8 @@ mod windows_tests {
             .unwrap_or(false);
         let result = windows_dir_admin_controlled(tmp.path());
         assert!(icacls_ok, "icacls setup should succeed so the test is meaningful");
-        assert_eq!(
-            result.unwrap_or(false),
-            true,
+        assert!(
+            result.expect("security check should not fail"),
             "Dir with read-only Users and admin owner should be trusted"
         );
     }
@@ -1164,9 +1163,8 @@ mod windows_tests {
             .map(|o| o.status.success())
             .unwrap_or(false);
         assert!(granted, "icacls /grant {icacls_grant} should succeed so the test is meaningful");
-        assert_eq!(
-            windows_dir_admin_controlled(tmp.path()).unwrap_or(true),
-            false,
+        assert!(
+            !windows_dir_admin_controlled(tmp.path()).expect("security check should not fail"),
             "Dir with {icacls_grant} write grant should not be admin-controlled"
         );
     }
