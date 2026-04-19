@@ -394,21 +394,21 @@ impl Doctor {
             WindowsDirTrust::Trusted => {}
             WindowsDirTrust::Insecure => {
                 self.warnings.push(format!(
-                    "System directory {} exists but is not owned by Administrators or SYSTEM \
-                     and/or is writable by standard users.\n\
+                    "System directory {} is not admin-controlled (ownership or write-access check failed).\n\
+                     The owner must be Administrators or SYSTEM, and standard users must not have write access.\n\
                      Mise is ignoring it to prevent privilege escalation.\n\
                      Fix (run as Administrator):\n  \
-                     icacls \"{display}\" /setowner \"Administrators\" /T /C\n  \
-                     icacls \"{display}\" /inheritance:r /grant \"Administrators:(OI)(CI)F\" \
+                     icacls \"{d}\" /setowner \"Administrators\" /T /C\n  \
+                     icacls \"{d}\" /inheritance:r /grant \"Administrators:(OI)(CI)F\" \
                      /grant \"SYSTEM:(OI)(CI)F\" /grant \"Users:(OI)(CI)RX\"\n\
                      Override: set MISE_SYSTEM_CONFIG_DIR to use a trusted path.",
                     dir.display(),
-                    display = dir.display(),
+                    d = dir.display(),
                 ));
             }
             WindowsDirTrust::CheckFailed => {
                 self.warnings.push(format!(
-                    "Could not verify ownership of system directory {} (Windows API error).\n\
+                    "Could not verify write-access on system directory {} (Windows API error).\n\
                      Mise is ignoring it as a precaution.\n\
                      Override: set MISE_SYSTEM_CONFIG_DIR to use a trusted path.",
                     dir.display(),

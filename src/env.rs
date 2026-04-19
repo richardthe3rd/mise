@@ -834,24 +834,35 @@ fn windows_programdata_mise() -> PathBuf {
 pub(crate) enum WindowsDirTrust {
     /// Directory is safe to use (admin-controlled, or env var override, or doesn't exist yet).
     Trusted,
-    /// Directory exists but failed the ownership/write check.
+    /// Directory exists but failed the ownership or write-access check.
     Insecure,
     /// The security check itself failed with a Windows API error.
     CheckFailed,
 }
 
-/// Checks whether `path` is both:
-/// 1. Owned by `BUILTIN\Administrators` or `NT AUTHORITY\SYSTEM`, AND
-/// 2. Not writable by the `BUILTIN\Users` group.
+/// Checks whether `path` is safe to use as a system config/data directory:
 ///
-/// Returns `Ok(true)` if admin-controlled, `Ok(false)` if not, `Err` if check failed.
+/// 1. The owner must be `BUILTIN\Administrators` or `NT AUTHORITY\SYSTEM`.
+/// 2. None of `BUILTIN\Users`, `Authenticated Users`, `Everyone`, or `INTERACTIVE`
+///    may have write access.
+///
+/// Both checks are required: (1) prevents the owner's implicit `WRITE_DAC` right from being
+/// used to reclaim write access even when the ACL denies it; (2) prevents direct writes.
+///
+/// **Known limitation:** a directory whose owner is an individual admin user's SID (rather than
+/// `BUILTIN\Administrators`) will be rejected as `Insecure` even if it is otherwise safe. A
+/// proper system installer sets `BUILTIN\Administrators` as owner via the elevated UAC token.
+/// This matches the approach taken by git's CVE-2022-24765 fix.
+///
+/// Returns `Ok(true)` if admin-controlled, `Ok(false)` if not, `Err` if the check failed.
 #[cfg(windows)]
 fn windows_dir_admin_controlled(path: &Path) -> Result<bool> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Foundation::{ERROR_SUCCESS, LocalFree};
     use windows_sys::Win32::Security::{
-        CreateWellKnownSid, IsWellKnownSid, WinBuiltinAdministratorsSid, WinBuiltinUsersSid,
-        WinLocalSystemSid, ACL, DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION, PSID,
+        CreateWellKnownSid, IsWellKnownSid, WinAuthenticatedUserSid, WinBuiltinAdministratorsSid,
+        WinBuiltinUsersSid, WinInteractiveSid, WinLocalSystemSid, WinWorldSid, ACL,
+        DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION, PSID,
     };
     use windows_sys::Win32::Security::Authorization::{
         GetEffectiveRightsFromAclW, GetNamedSecurityInfoW, SE_FILE_OBJECT, TRUSTEE_IS_SID,
@@ -900,49 +911,61 @@ fn windows_dir_admin_controlled(path: &Path) -> Result<bool> {
             || IsWellKnownSid(owner_sid, WinLocalSystemSid) != 0
     };
 
-    // Check 2: BUILTIN\Users must not have write access to the directory.
-    // On domain-joined machines, `Authenticated Users` (S-1-5-11) and `BUILTIN\Users`
-    // (S-1-5-32-545) are distinct groups. An ACL granting only `Authenticated Users`
-    // write access would pass this check. Workgroup machines are unaffected (equivalent groups).
-    let mut users_sid_buf = [0u8; 68]; // SECURITY_MAX_SID_SIZE
-    let mut sid_size = users_sid_buf.len() as u32;
-    let users_sid_ok = unsafe {
-        CreateWellKnownSid(
-            WinBuiltinUsersSid,
-            std::ptr::null_mut(),
-            users_sid_buf.as_mut_ptr() as PSID,
-            &mut sid_size,
-        ) != 0
-    };
-
-    let users_no_write = if users_sid_ok && !dacl.is_null() {
+    // Check 2: none of the standard-user principals may have write access.
+    // GENERIC_WRITE is never stored directly in ACEs; check specific write rights only.
+    // FILE_WRITE_ATTRIBUTES/EA are included for completeness — attribute-write alone can't
+    // inject content but is still a write right.
+    // NOTE: GetEffectiveRightsFromAclW does not consider all group memberships and can be
+    // unreliable with inherited ACEs on some Windows versions (see MSDN). For our threat
+    // model (locally-created directories) this is acceptable; AccessCheck with a restricted
+    // token would be more robust.
+    let write_mask: u32 = FILE_WRITE_DATA
+        | FILE_ADD_FILE
+        | FILE_ADD_SUBDIRECTORY
+        | FILE_WRITE_EA
+        | FILE_WRITE_ATTRIBUTES
+        | WRITE_DAC
+        | WRITE_OWNER
+        | DELETE;
+    // Check all four non-privileged principals. On domain-joined machines `Authenticated Users`
+    // (S-1-5-11) and `BUILTIN\Users` (S-1-5-32-545) are distinct; an ACL that grants write only
+    // to `Authenticated Users` would pass a BUILTIN\Users-only check. `Everyone` and `INTERACTIVE`
+    // cover the remaining well-known non-privileged groups.
+    let standard_principals: &[u32] = &[
+        WinBuiltinUsersSid,
+        WinAuthenticatedUserSid,
+        WinWorldSid,
+        WinInteractiveSid,
+    ];
+    let mut users_no_write = true;
+    'principals: for &well_known in standard_principals {
+        let mut sid_buf = [0u8; 68]; // SECURITY_MAX_SID_SIZE
+        let mut sid_size = sid_buf.len() as u32;
+        let sid_ok = unsafe {
+            CreateWellKnownSid(
+                well_known,
+                std::ptr::null_mut(),
+                sid_buf.as_mut_ptr() as PSID,
+                &mut sid_size,
+            ) != 0
+        };
+        if !sid_ok || dacl.is_null() {
+            users_no_write = false; // Could not verify — treat as untrusted
+            break 'principals;
+        }
         let mut trustee: TRUSTEE_W = unsafe { std::mem::zeroed() };
         trustee.TrusteeForm = TRUSTEE_IS_SID;
         // TrusteeType is ignored by GetEffectiveRightsFromAclW; zeroed = TRUSTEE_IS_UNKNOWN
-        trustee.ptstrName = users_sid_buf.as_mut_ptr() as *mut _;
+        trustee.ptstrName = sid_buf.as_mut_ptr() as *mut _;
         let mut access_rights: u32 = 0;
-        // NOTE: GetEffectiveRightsFromAclW does not consider all group memberships and can be
-        // unreliable with inherited ACEs on some Windows versions (see MSDN). For our threat
-        // model (locally-created directories) this is acceptable; AccessCheck with a restricted
-        // token would be more robust.
         let err2 = unsafe {
             GetEffectiveRightsFromAclW(dacl as *const ACL, &trustee as *const TRUSTEE_W, &mut access_rights)
         };
-        // GENERIC_WRITE is never stored directly in ACEs; check specific write rights only.
-        // FILE_WRITE_ATTRIBUTES (0x0100) and FILE_WRITE_EA (0x0010) are included for
-        // completeness — attribute-write alone can't inject content but is still a write right.
-        let write_mask: u32 = FILE_WRITE_DATA
-            | FILE_ADD_FILE
-            | FILE_ADD_SUBDIRECTORY
-            | FILE_WRITE_EA
-            | FILE_WRITE_ATTRIBUTES
-            | WRITE_DAC
-            | WRITE_OWNER
-            | DELETE;
-        err2 == ERROR_SUCCESS && (access_rights & write_mask) == 0
-    } else {
-        false // Could not verify — treat as untrusted
-    };
+        if err2 != ERROR_SUCCESS || (access_rights & write_mask) != 0 {
+            users_no_write = false;
+            break 'principals;
+        }
+    }
 
     unsafe { LocalFree(sd) };
     Ok(owner_privileged && users_no_write)
@@ -974,8 +997,9 @@ pub(crate) static WINDOWS_SYSTEM_DIR_STATE: Lazy<(WindowsDirTrust, PathBuf)> = L
         Ok(false) => {
             warn!(
                 "mise: ignoring {} as the system directory: it must be owned by \
-                 BUILTIN\\Administrators or NT AUTHORITY\\SYSTEM and not be writable \
-                 by standard users. Set MISE_SYSTEM_CONFIG_DIR to override.",
+                 BUILTIN\\Administrators or NT AUTHORITY\\SYSTEM, and none of \
+                 BUILTIN\\Users, Authenticated Users, Everyone, or INTERACTIVE may \
+                 have write access. Set MISE_SYSTEM_CONFIG_DIR to override.",
                 dir.display()
             );
             (Insecure, dir)
@@ -1109,13 +1133,12 @@ mod windows_tests {
 
     #[test]
     fn test_admin_owned_dir_without_user_write_is_trusted() {
-        // Configure the dir as admin-controlled:
+        // Configure the dir with an admin-controlled ACL:
         // - Remove inherited ACEs (/inheritance:r)
         // - Grant Administrators and SYSTEM full control
         // - Grant Users read-and-execute only (no write)
-        // On windows-latest CI (elevated runner), new directories are owned by
-        // BUILTIN\Administrators, satisfying the owner check. Removing Users
-        // write access ensures users_no_write=true → function returns Ok(true).
+        // On windows-latest CI (elevated runner) new directories are owned by
+        // BUILTIN\Administrators, satisfying the owner check.
         let tmp = tempdir().unwrap();
         let icacls_ok = std::process::Command::new("icacls")
             .args([
@@ -1136,7 +1159,7 @@ mod windows_tests {
         assert_eq!(
             result.unwrap_or(false),
             true,
-            "Admin-owned dir with read-only Users should be admin-controlled"
+            "Dir with admin owner and read-only Users should be trusted"
         );
     }
 

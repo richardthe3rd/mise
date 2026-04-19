@@ -226,16 +226,17 @@ impl Install {
             match trust {
                 WindowsDirTrust::Insecure => {
                     warn!(
-                        "mise: system install directory {} is not owned by Administrators/SYSTEM \
-                         and/or is writable by standard users. \
+                        "mise: system install directory {} is not admin-controlled \
+                         (ownership or write-access check failed). \
                          Tools installed there will not be loaded by mise. \
-                         Run as Administrator to fix ownership. Proceeding with installation.",
+                         Run as Administrator to fix ownership and permissions. \
+                         Proceeding with installation.",
                         env::MISE_SYSTEM_INSTALLS_DIR.display()
                     );
                 }
                 WindowsDirTrust::CheckFailed => {
                     warn!(
-                        "mise: could not verify ownership of system install directory {} \
+                        "mise: could not verify write-access on system install directory {} \
                          (Windows API error). \
                          Tools installed there will not be loaded by mise. \
                          Set MISE_SYSTEM_DATA_DIR to override. Proceeding with installation.",
